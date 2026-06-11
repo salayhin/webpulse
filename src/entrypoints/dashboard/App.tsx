@@ -682,14 +682,14 @@ function SettingsTab() {
     if (!whitelistDomain.trim()) return;
     const domain = normalizeDomain(whitelistDomain);
     const updated = ignored.includes(domain) ? ignored : [...ignored, domain];
-    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    await db.settings.update('default', { ignoredDomains: updated });
     setIgnored(updated);
     setWhitelistDomain('');
   }
 
   async function removeWhitelist(domain: string) {
     const updated = ignored.filter(d => d !== domain);
-    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    await db.settings.update('default', { ignoredDomains: updated });
     setIgnored(updated);
   }
 
@@ -804,18 +804,15 @@ function SettingsTab() {
       <section className="card">
         <h2 className="card-title">Activity and spent time for these websites will not be tracked</h2>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div className="entry-box">
           {ignored.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {ignored.map(d => (
-                <li key={d} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <span style={{ fontSize: '13px', color: '#333' }}>{d}</span>
-                  <button className="btn btn-small btn-danger" onClick={() => removeWhitelist(d)}>Remove</button>
-                </li>
+                <SiteRow key={d} domain={d} onDelete={() => removeWhitelist(d)} />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No whitelisted sites yet</p>
+            <p className="entry-empty">No whitelisted sites yet</p>
           )}
         </div>
 
