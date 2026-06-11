@@ -604,6 +604,11 @@ function PomodoroTab() {
     (async () => {
       const data = await chrome.storage.local.get('pomodoro');
       const state: PomodoroState = { ...DEFAULT_POM, ...(data.pomodoro || {}) };
+      // Normalize ambient ids — the legacy 'white' option was replaced by
+      // 'wave' / 'rain'; reset to 'none' if the stored value is unknown.
+      if (!AMBIENT_OPTIONS.some(o => o.id === state.ambientSound)) {
+        state.ambientSound = DEFAULT_AMBIENT;
+      }
       setPom(state);
       setWorkMins(state.workMins);
       setRestMins(state.restMins);
