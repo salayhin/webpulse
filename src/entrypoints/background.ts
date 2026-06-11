@@ -249,9 +249,51 @@ export default defineBackground(() => {
   // This also handles SW restarts — a killed SW has no activeSession,
   // so flushSession() is a no-op and captureCurrentTab() picks back up.
   chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name !== 'heartbeat') return;
-    await flushSession();
-    await captureCurrentTab();
+    if (alarm.name === 'heartbeat') {
+      await flushSession();
+      await captureCurrentTab();
+    } else if (alarm.name === 'pomodoro-work') {
+      // Work session done → transition to rest
+      const state = await chrome.storage.local.get('pomodoro');
+      const pom = state.pomodoro || { mode: 'idle', workMins: 25, restMins: 5, sessionsCompleted: 0 };
+      pom.mode = 'rest';
+      pom.startedAt = Date.now();
+      pom.sessionsCompleted = (pom.sessionsCompleted ?? 0) + 1;
+      await chrome.storage.local.set({ pomodoro: pom });
+      await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'work-done' }).catch(() => {});
+      chrome.notifications.create('pomodoro-work', {
+        type: 'basic',
+        iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%236366f1"/%3E%3Ctext x="50%%" y="50%%" font-size="28" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E✓%3C/text%3E%3C/svg%3E',
+        title: '🎉 Work session complete!',
+        message: `Take a ${pom.restMins}-minute break. (Session ${pom.sessionsCompleted} done)`,
+      });
+      chrome.alarms.create('pomodoro-rest', { delayInMinutes: pom.restMins });
+    } else if (alarm.name === 'pomodoro-rest') {
+      // Rest session done → back to idle
+      const state = await chrome.storage.local.get('pomodoro');
+      const pom = state.pomodoro || { mode: 'idle', workMins: 25, restMins: 5, sessionsCompleted: 0 };
+      pom.mode = 'idle';
+      pom.startedAt = null;
+      await chrome.storage.local.set({ pomodoro: pom });
+      await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'rest-done' }).catch(() => {});
+      chrome.notifications.create('pomodoro-rest', {
+        type: 'basic',
+        iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%2334d399"/%3E%3Ctext x="50%%" y="50%%" font-size="28" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E▶%3C/text%3E%3C/svg%3E',
+        title: '⏱️ Break over!',
+        message: 'Ready for another session?',
+      });
+    } else if (alarm.name === 'daily-recap') {
+      // 8 PM daily recap notification
+      const today = localDate();
+      const entries = await db.timeEntries.where('date').equals(today).toArray();
+      const totalMins = Math.round(entries.reduce((s, e) => s + e.duration, 0) / 60);
+      chrome.notifications.create('daily-recap', {
+        type: 'basic',
+        iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%23f87171"/%3E%3Ctext x="50%%" y="50%%" font-size="20" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E📊%3C/text%3E%3C/svg%3E',
+        title: '📊 Daily recap',
+        message: `You spent ${totalMins} minutes browsing today. Great job!`,
+      });
+    }
   });
 
   // ── Content script messages ──────────────────────────────────────────
@@ -294,9 +336,21 @@ export default defineBackground(() => {
 
   // ── Async init — must come AFTER all listener registrations ──────────
   void (async () => {
-    const existing = await chrome.alarms.get('heartbeat');
-    if (!existing) {
+    const [heartbeat, dailyRecap] = await Promise.all([
+      chrome.alarms.get('heartbeat'),
+      chrome.alarms.get('daily-recap'),
+    ]);
+    if (!heartbeat) {
       chrome.alarms.create('heartbeat', { periodInMinutes: 1 });
+    }
+    if (!dailyRecap) {
+      // Fire at 8 PM every day (set to fire in ~1s if already past 8 PM today)
+      const now = new Date();
+      const tonight = new Date(now);
+      tonight.setHours(20, 0, 0, 0);
+      if (now > tonight) tonight.setDate(tonight.getDate() + 1);
+      const delayMs = tonight.getTime() - now.getTime();
+      chrome.alarms.create('daily-recap', { delayInMinutes: Math.ceil(delayMs / 60000), periodInMinutes: 24 * 60 });
     }
     // Capture the tab the user is already on when SW starts/restarts
     await captureCurrentTab();

@@ -14,9 +14,11 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+import { exportAll } from '../../lib/export';
+
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
 const MANUAL_CATS: Category[] = ['productivity', 'social', 'entertainment', 'news', 'education', 'other'];
-type MainTab = 'overview' | 'youtube' | 'settings';
+type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'settings';
 type RangeTab = 'today' | 'week' | 'month';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -430,6 +432,162 @@ function YouTubeTab() {
   );
 }
 
+// ── Pomodoro Tab ────────────────────────────────────────────────────────────
+
+interface PomodoroState {
+  mode: 'idle' | 'work' | 'rest';
+  startedAt: number | null;
+  workMins: number;
+  restMins: number;
+  sessionsCompleted: number;
+}
+
+function PomodoroTab() {
+  const [pom, setPom] = useState<PomodoroState>({ mode: 'idle', startedAt: null, workMins: 25, restMins: 5, sessionsCompleted: 0 });
+  const [displaySecs, setDisplaySecs] = useState(0);
+  const [workMinsInput, setWorkMinsInput] = useState('25');
+  const [restMinsInput, setRestMinsInput] = useState('5');
+
+  useEffect(() => {
+    // Load initial state
+    (async () => {
+      const data = await chrome.storage.local.get('pomodoro');
+      const state = data.pomodoro || pom;
+      setPom(state);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (pom.mode === 'idle') return;
+    const interval = setInterval(async () => {
+      const data = await chrome.storage.local.get('pomodoro');
+      const current = data.pomodoro;
+      if (!current || !current.startedAt) {
+        setDisplaySecs(0);
+        return;
+      }
+      const duration = (current.mode === 'work' ? current.workMins : current.restMins) * 60;
+      const elapsed = Math.floor((Date.now() - current.startedAt) / 1000);
+      setDisplaySecs(Math.max(0, duration - elapsed));
+      setPom(current);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [pom.mode]);
+
+  async function startSession() {
+    const workMin = Math.max(1, parseInt(workMinsInput) || 25);
+    const restMin = Math.max(1, parseInt(restMinsInput) || 5);
+    const state: PomodoroState = {
+      mode: 'work',
+      startedAt: Date.now(),
+      workMins: workMin,
+      restMins: restMin,
+      sessionsCompleted: 0,
+    };
+    setPom(state);
+    await chrome.storage.local.set({ pomodoro: state });
+    chrome.alarms.create('pomodoro-work', { delayInMinutes: workMin });
+    setDisplaySecs(workMin * 60);
+  }
+
+  async function pauseSession() {
+    const state = { ...pom, mode: 'idle' as const, startedAt: null };
+    setPom(state);
+    await chrome.storage.local.set({ pomodoro: state });
+    chrome.alarms.clear('pomodoro-work');
+    chrome.alarms.clear('pomodoro-rest');
+    setDisplaySecs(0);
+  }
+
+  async function resetSession() {
+    const state = { ...pom, mode: 'idle' as const, startedAt: null, sessionsCompleted: 0 };
+    setPom(state);
+    await chrome.storage.local.set({ pomodoro: state });
+    chrome.alarms.clear('pomodoro-work');
+    chrome.alarms.clear('pomodoro-rest');
+    setDisplaySecs(0);
+  }
+
+  const formatTime = (secs: number): string => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const modeColor = pom.mode === 'work' ? '#6366f1' : pom.mode === 'rest' ? '#34d399' : '#ccc';
+  const modeLabel = pom.mode === 'work' ? 'Work' : pom.mode === 'rest' ? 'Rest' : 'Idle';
+
+  return (
+    <>
+      <section className="card">
+        <h2 className="card-title">Pomodoro Timer</h2>
+
+        {/* Timer display */}
+        <div className="pomodoro-display" style={{ borderColor: modeColor }}>
+          <div className="pom-time">{formatTime(displaySecs)}</div>
+          <div className="pom-mode">{modeLabel}{pom.mode !== 'idle' && ` (${pom.sessionsCompleted} complete)`}</div>
+        </div>
+
+        {/* Control buttons */}
+        {pom.mode === 'idle' ? (
+          <>
+            <div className="form-group">
+              <label>Work Duration (min)</label>
+              <input
+                type="number"
+                className="form-input"
+                min="1"
+                max="60"
+                value={workMinsInput}
+                onChange={e => setWorkMinsInput(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>Rest Duration (min)</label>
+              <input
+                type="number"
+                className="form-input"
+                min="1"
+                max="30"
+                value={restMinsInput}
+                onChange={e => setRestMinsInput(e.target.value)}
+              />
+            </div>
+            <button className="btn btn-primary btn-large" onClick={startSession}>
+              Start Session
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="pom-buttons">
+              <button className="btn btn-secondary" onClick={pauseSession}>
+                Pause
+              </button>
+              <button className="btn btn-danger" onClick={resetSession}>
+                Reset
+              </button>
+            </div>
+            <p className="pom-note">
+              {pom.mode === 'work'
+                ? '🎯 Focus time. Silence your notifications!'
+                : '☕ Take a break. Stretch, hydrate, rest your eyes.'}
+            </p>
+          </>
+        )}
+      </section>
+
+      {/* Export section */}
+      <section className="card">
+        <h2 className="card-title">Export Data</h2>
+        <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
+        <button className="btn btn-primary" onClick={() => exportAll()}>
+          📥 Export All Data
+        </button>
+      </section>
+    </>
+  );
+}
+
 // ── Settings Tab ────────────────────────────────────────────────────────────
 
 function SettingsTab() {
@@ -643,6 +801,9 @@ export default function App() {
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
             <span className="yt-icon">▶</span> YouTube
           </button>
+          <button className={`main-tab ${tab === 'pomodoro' ? 'main-tab-active' : ''}`} onClick={() => setTab('pomodoro')}>
+            ⏱️ Pomodoro
+          </button>
           <button className={`main-tab ${tab === 'settings' ? 'main-tab-active' : ''}`} onClick={() => setTab('settings')}>
             ⚙️ Settings
           </button>
@@ -651,7 +812,7 @@ export default function App() {
 
       <main className="dash-main">
         <ErrorBoundary>
-          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : <SettingsTab />}
+          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : tab === 'pomodoro' ? <PomodoroTab /> : <SettingsTab />}
         </ErrorBoundary>
       </main>
     </div>
