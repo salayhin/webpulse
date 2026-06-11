@@ -576,22 +576,6 @@ function PomodoroTab() {
         )}
       </section>
 
-      {/* Export section */}
-      <section className="card">
-        <h2 className="card-title">Export Data</h2>
-        <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
-        <div className="export-buttons">
-          <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
-            📹 Export YouTube Only
-          </button>
-          <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
-            🌐 Export Browsing Only
-          </button>
-          <button className="btn btn-secondary" onClick={() => exportAll()}>
-            📥 Export All Data
-          </button>
-        </div>
-      </section>
     </>
   );
 }
@@ -741,6 +725,23 @@ function SettingsTab() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* Export Data */}
+      <section className="card">
+        <h2 className="card-title">Export Data</h2>
+        <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
+        <div className="export-buttons">
+          <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
+            📹 Export YouTube Only
+          </button>
+          <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
+            🌐 Export Browsing Only
+          </button>
+          <button className="btn btn-secondary" onClick={() => exportAll()}>
+            📥 Export All Data
+          </button>
+        </div>
       </section>
     </>
   );
