@@ -616,6 +616,8 @@ function SettingsTab() {
   const [loading, setLoading] = useState(true);
   const [limitDomain, setLimitDomain] = useState('');
   const [limitMins, setLimitMins] = useState('60');
+  const [completelyBlock, setCompletelyBlock] = useState(false);
+  const [editingLimit, setEditingLimit] = useState<string | null>(null);
   const [whitelistDomain, setWhitelistDomain] = useState('');
   const [notifyWebsite, setNotifyWebsite] = useState('');
   const [notifyInterval, setNotifyInterval] = useState('30');
@@ -644,21 +646,36 @@ function SettingsTab() {
   async function addLimit() {
     if (!limitDomain.trim()) return;
     const domain = normalizeDomain(limitDomain);
-    const seconds = Math.max(60, parseInt(limitMins) * 60);
+    const seconds = completelyBlock ? 0 : Math.max(0, (parseInt(limitMins) || 0) * 60);
+    // put() intentionally drops deferUntil/deferUsedDate — editing a limit resets today's postpone
     await db.domainRestrictions.put({ domain, dailyLimitSeconds: seconds });
-    setRestrictions(prev => {
-      const idx = prev.findIndex(r => r.domain === domain);
-      if (idx >= 0) prev[idx] = { domain, dailyLimitSeconds: seconds };
-      else prev.push({ domain, dailyLimitSeconds: seconds });
-      return [...prev];
-    });
+    if (editingLimit && editingLimit !== domain) {
+      await db.domainRestrictions.delete(editingLimit);
+    }
+    const rests = await db.domainRestrictions.toArray();
+    setRestrictions(rests.map(r => ({ domain: r.domain, dailyLimitSeconds: r.dailyLimitSeconds })));
     setLimitDomain('');
     setLimitMins('60');
+    setCompletelyBlock(false);
+    setEditingLimit(null);
   }
 
   async function removeLimit(domain: string) {
     await db.domainRestrictions.delete(domain);
     setRestrictions(prev => prev.filter(r => r.domain !== domain));
+    if (editingLimit === domain) {
+      setEditingLimit(null);
+      setLimitDomain('');
+      setLimitMins('60');
+      setCompletelyBlock(false);
+    }
+  }
+
+  function startEditLimit(r: { domain: string; dailyLimitSeconds: number }) {
+    setLimitDomain(r.domain);
+    setLimitMins(String(Math.round(r.dailyLimitSeconds / 60)));
+    setCompletelyBlock(r.dailyLimitSeconds === 0);
+    setEditingLimit(r.domain);
   }
 
   async function addWhitelist() {
@@ -719,7 +736,7 @@ function SettingsTab() {
         <p className="card-subtitle">Set the maximum time allowed to visit the website per day. After this time, the site will be blocked.</p>
         <p className="card-subtitle" style={{ fontSize: '12px', color: '#666' }}>If you set the blocking time to 0 hours 0 minutes, the website will be blocked immediately</p>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
           <input
             type="text"
             className="form-input"
@@ -729,11 +746,12 @@ function SettingsTab() {
             onKeyDown={e => e.key === 'Enter' && addLimit()}
             style={{ flex: 1 }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px', opacity: completelyBlock ? 0.5 : 1 }}>
             <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
             <input
               type="time"
-              value={String(Math.floor(parseInt(limitMins) / 60)).padStart(2, '0') + ':' + String(parseInt(limitMins) % 60).padStart(2, '0')}
+              disabled={completelyBlock}
+              value={String(Math.floor((parseInt(limitMins) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(limitMins) || 0) % 60).padStart(2, '0')}
               onChange={e => {
                 const [h, m] = e.target.value.split(':');
                 setLimitMins(String(parseInt(h) * 60 + parseInt(m)));
@@ -747,24 +765,37 @@ function SettingsTab() {
               ✕
             </button>
           </div>
-          <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>Add Website</button>
+          <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>
+            {editingLimit ? 'Save' : 'Add Website'}
+          </button>
         </div>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <input
+            type="checkbox"
+            id="completely-block"
+            checked={completelyBlock}
+            onChange={e => setCompletelyBlock(e.target.checked)}
+            style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#6366f1' }}
+          />
+          <label htmlFor="completely-block" style={{ fontSize: '13px', color: '#333', cursor: 'pointer' }}>Completely Block</label>
+        </div>
+
+        <div className="entry-box">
           {restrictions.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {restrictions.map(r => (
-                <li key={r.domain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <div>
-                    <strong style={{ fontSize: '13px', color: '#111', display: 'block' }}>{r.domain}</strong>
-                    <span style={{ fontSize: '11px', color: '#888' }}>{Math.round(r.dailyLimitSeconds / 60)} min/day</span>
-                  </div>
-                  <button className="btn btn-small btn-danger" onClick={() => removeLimit(r.domain)}>Remove</button>
-                </li>
+                <SiteRow
+                  key={r.domain}
+                  domain={r.domain}
+                  subtext={r.dailyLimitSeconds === 0 ? 'Completely Blocked' : `Limit : ${fmtHM(Math.round(r.dailyLimitSeconds / 60))}`}
+                  onDelete={() => removeLimit(r.domain)}
+                  onEdit={() => startEditLimit(r)}
+                />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No restrictions yet</p>
+            <p className="entry-empty">No restrictions yet</p>
           )}
         </div>
       </section>
