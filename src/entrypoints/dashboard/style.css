@@ -740,6 +740,6 @@ body {
 .hm-hour { font-size: 10px; color: #aaa; text-align: center; height: 16px; line-height: 16px; }
 .hm-day { font-size: 11px; color: #666; font-weight: 600; }
 .hm-cell { height: 20px; border-radius: 3px; cursor: default; transition: transform 0.1s; }
-.hm-cell:hover { transform: scale(1.18); outline: 1px solid rgba(99,102,241,0.5); }
+.hm-cell:hover { transform: scale(1.18); outline: 1px solid rgba(46,160,67,0.6); }
 .hm-legend { display: flex; align-items: center; gap: 5px; justify-content: flex-end; font-size: 11px; color: #999; }
 .hm-swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }

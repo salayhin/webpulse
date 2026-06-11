@@ -290,9 +290,9 @@ function HourWeekdayHeatmap({ data }: { data: number[][] }) {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const max = Math.max(1, ...data.flat());
   const cellColor = (v: number) => {
-    if (v <= 0) return '#f1f1f6';
+    if (v <= 0) return '#ebedf0';
     const alpha = 0.18 + 0.82 * (v / max);
-    return `rgba(99, 102, 241, ${alpha.toFixed(3)})`;
+    return `rgba(46, 160, 67, ${alpha.toFixed(3)})`;
   };
 
   return (
@@ -318,7 +318,7 @@ function HourWeekdayHeatmap({ data }: { data: number[][] }) {
       </div>
       <div className="hm-legend">
         <span>less</span>
-        {['#f1f1f6', 'rgba(99,102,241,0.3)', 'rgba(99,102,241,0.55)', 'rgba(99,102,241,0.8)', 'rgba(99,102,241,1)'].map(bg => (
+        {['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'].map(bg => (
           <span key={bg} className="hm-swatch" style={{ background: bg }} />
         ))}
         <span>more</span>
