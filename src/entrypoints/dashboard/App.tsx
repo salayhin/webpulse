@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell,
 } from 'recharts';
 import { db, type Category } from '../../db';
 import { formatDuration, localDate } from '../../lib/hostname';
 import {
-  getYouTubeStats, getYouTubeByCategoryForRange,
-  getTopChannels, getRecentVideos, lastNDays,
+  getYouTubeStats, lastNDays,
   getDailyByCategory, getFocusSessions,
   CATEGORY_KEYS, CATEGORY_COLORS, type CategoryKey,
 } from '../../db/queries';
@@ -29,16 +27,6 @@ function getRangeForTab(tab: RangeTab): { start: string; end: string } {
 }
 
 // ── Custom tooltip ───────────────────────────────────────────────────────────
-
-function PieTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="chart-tooltip">
-      <p className="tooltip-label">{payload[0].name}</p>
-      <p className="tooltip-value">{formatDuration(payload[0].value)}</p>
-    </div>
-  );
-}
 
 function StackedTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
@@ -333,9 +321,11 @@ function CategoryLegend() {
 function YouTubeTab() {
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
   const [stats, setStats] = useState({ totalWatchedSeconds: 0, uniqueVideos: 0, sessionCount: 0 });
-  const [categories, setCategories] = useState<{ category: string; seconds: number }[]>([]);
-  const [channels, setChannels] = useState<{ channelName: string; seconds: number }[]>([]);
-  const [recent, setRecent] = useState<{ videoId: string; title: string; channelName: string; category: string; watchedSeconds: number }[]>([]);
+  const [channels, setChannels] = useState<{ channelName: string; seconds: number; videos: number }[]>([]);
+  const [channelTotal, setChannelTotal] = useState(0);
+  const [heat, setHeat] = useState<number[][]>(() => Array.from({ length: 7 }, () => Array(24).fill(0)));
+  const [dailyCats, setDailyCats] = useState<Array<Record<string, number | string>>>([]);
+  const [catKeys, setCatKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -343,16 +333,59 @@ function YouTubeTab() {
       setLoading(true);
       try {
         const { start, end } = getRangeForTab(rangeTab);
-        const [s, cats, chans, rec] = await Promise.all([
-          getYouTubeStats(start, end),
-          getYouTubeByCategoryForRange(start, end),
-          getTopChannels(start, end),
-          getRecentVideos(15),
-        ]);
-        setStats(s);
-        setCategories(cats);
+        const allVids = await db.videoSessions.toArray();
+        setStats(await getYouTubeStats(start, end));
+
+        // Channels in range — watch time, distinct videos, share of total
+        const rangeVids = allVids.filter(v => v.date >= start && v.date <= end);
+        const chanMap = new Map<string, { seconds: number; videos: Set<string> }>();
+        for (const v of rangeVids) {
+          let g = chanMap.get(v.channelName);
+          if (!g) { g = { seconds: 0, videos: new Set() }; chanMap.set(v.channelName, g); }
+          g.seconds += v.watchedSeconds;
+          g.videos.add(v.videoId);
+        }
+        const chans = [...chanMap.entries()]
+          .map(([channelName, g]) => ({ channelName, seconds: g.seconds, videos: g.videos.size }))
+          .sort((a, b) => b.seconds - a.seconds);
         setChannels(chans);
-        setRecent(rec);
+        setChannelTotal(chans.reduce((t, c) => t + c.seconds, 0));
+
+        // Watch heatmap (hour × weekday) across all watch history
+        const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
+        for (const v of allVids) {
+          const d = new Date(v.startedAt);
+          matrix[(d.getDay() + 6) % 7][d.getHours()] += v.watchedSeconds / 60;
+        }
+        setHeat(matrix);
+
+        // Daily watch time by category — last 7 days, stacked
+        const dayObjs: Date[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const dt = new Date(); dt.setHours(0, 0, 0, 0); dt.setDate(dt.getDate() - i);
+          dayObjs.push(dt);
+        }
+        const firstDay = localDate(dayObjs[0].getTime());
+        const catSet = new Set<string>();
+        const dayCatMins = new Map<string, Record<string, number>>();
+        for (const v of allVids) {
+          if (v.date < firstDay) continue;
+          const cat = v.category || 'Unknown';
+          catSet.add(cat);
+          let r = dayCatMins.get(v.date); if (!r) { r = {}; dayCatMins.set(v.date, r); }
+          r[cat] = (r[cat] ?? 0) + v.watchedSeconds / 60;
+        }
+        const keys = [...catSet];
+        const rows = dayObjs.map((dt, i) => {
+          const r = dayCatMins.get(localDate(dt.getTime())) ?? {};
+          const row: Record<string, number | string> = {
+            label: i === dayObjs.length - 1 ? 'Today' : dt.toLocaleDateString('en', { weekday: 'short' }),
+          };
+          for (const k of keys) row[k] = Math.round((r[k] ?? 0) * 10) / 10;
+          return row;
+        });
+        setCatKeys(keys);
+        setDailyCats(rows);
       } catch (err) {
         console.error('Failed to load YouTube stats', err);
       } finally {
@@ -361,9 +394,11 @@ function YouTubeTab() {
     })();
   }, [rangeTab]);
 
-  const maxCatSecs = categories[0]?.seconds ?? 1;
   const maxChanSecs = channels[0]?.seconds ?? 1;
   const hasSessions = stats.sessionCount > 0;
+  const hasDaily = dailyCats.some(row => catKeys.some(k => (row[k] as number) > 0));
+  const ytCatColor = (cat: string, i: number) =>
+    cat.toLowerCase() === 'unknown' ? '#cbd5e1' : COLORS[i % COLORS.length];
 
   return (
     <>
@@ -381,80 +416,71 @@ function YouTubeTab() {
         <div className="card"><Empty text="No YouTube watch sessions recorded yet. Go watch a video and come back." /></div>
       ) : (
         <>
-          {/* Category breakdown */}
+          {/* Watch activity heatmap */}
           <section className="card">
-            <h2 className="card-title">Watch Time by Category</h2>
-            <div className="sites-layout">
-              <ul className="site-list" style={{ flex: 1 }}>
-                {categories.map(({ category, seconds }, i) => (
-                  <li key={category} className="site-row">
-                    <div className="site-name">
-                      <span className="cat-dot" style={{ background: COLORS[i % COLORS.length] }} />
-                      <span className="domain-text">{category}</span>
-                    </div>
-                    <div className="bar-wrap">
-                      <div className="bar" style={{ width: `${(seconds / maxCatSecs) * 100}%`, background: COLORS[i % COLORS.length] }} />
-                    </div>
-                    <span className="site-time">{formatDuration(seconds)}</span>
-                  </li>
-                ))}
-              </ul>
-              {categories.length > 1 && (
-                <div className="pie-wrap">
-                  <PieChart width={180} height={180}>
-                    <Pie data={categories.map(c => ({ name: c.category, value: c.seconds }))} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} strokeWidth={0}>
-                      {categories.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip content={<PieTooltip />} />
-                  </PieChart>
-                </div>
-              )}
-            </div>
+            <h2 className="card-title" style={{ marginBottom: 4 }}>Watch activity by hour &amp; day</h2>
+            <p className="card-subtitle" style={{ marginTop: 0, marginBottom: 16 }}>When you watch across the week — darker means more watch time</p>
+            <HourWeekdayHeatmap data={heat} />
           </section>
 
-          {/* Top channels */}
+          {/* Daily watch time by category */}
           <section className="card">
-            <h2 className="card-title">Top Channels</h2>
-            <ul className="site-list">
-              {channels.map(({ channelName, seconds }, i) => (
-                <li key={channelName} className="site-row">
-                  <div className="site-name">
-                    <span className="channel-initial" style={{ background: COLORS[i % COLORS.length] }}>
-                      {channelName.charAt(0).toUpperCase()}
+            <h2 className="card-title">Daily Watch Time by Category — Last 7 Days</h2>
+            {!hasDaily ? <Empty text="Watch a few videos and come back." /> : (
+              <>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={dailyCats} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#666' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} unit="m" width={36} />
+                    <Tooltip content={<StackedTooltip />} cursor={{ fill: '#f5f5ff' }} />
+                    {catKeys.map((k, i) => (
+                      <Bar key={k} dataKey={k} stackId="a" fill={ytCatColor(k, i)} radius={i === catKeys.length - 1 ? [6, 6, 0, 0] : 0} maxBarSize={48} />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="legend">
+                  {catKeys.map((k, i) => (
+                    <span key={k} className="legend-item">
+                      <span className="cat-dot" style={{ background: ytCatColor(k, i) }} />
+                      <span>{k}</span>
                     </span>
-                    <span className="domain-text">{channelName}</span>
-                  </div>
-                  <div className="bar-wrap">
-                    <div className="bar" style={{ width: `${(seconds / maxChanSecs) * 100}%`, background: COLORS[i % COLORS.length] }} />
-                  </div>
-                  <span className="site-time">{formatDuration(seconds)}</span>
-                </li>
-              ))}
-            </ul>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
 
-          {/* Recent videos */}
+          {/* Channels watched */}
           <section className="card">
-            <h2 className="card-title">Recently Watched</h2>
-            <ul className="video-list">
-              {recent.map(v => (
-                <li key={`${v.videoId}-${v.startedAt}`} className="video-row">
-                  <a
-                    href={`https://www.youtube.com/watch?v=${v.videoId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="video-title"
-                  >
-                    {v.title}
-                  </a>
-                  <div className="video-meta">
-                    <span className="video-channel">{v.channelName}</span>
-                    <span className="video-cat">{v.category}</span>
-                    <span className="video-dur">{formatDuration(v.watchedSeconds)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <h2 className="card-title">Channels · {rangeTab}</h2>
+            {channels.length === 0 ? <Empty text="No channels for this period." /> : (
+              <ul className="visited-list">
+                {channels.map(({ channelName, seconds, videos }, i) => {
+                  const pct = channelTotal > 0 ? (seconds / channelTotal) * 100 : 0;
+                  return (
+                    <li key={channelName} className="visited-row">
+                      <span className="visited-favicon channel-avatar" style={{ background: COLORS[i % COLORS.length] }}>
+                        {channelName.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="visited-body">
+                        <div className="visited-head">
+                          <span className="visited-domain">{channelName}</span>
+                          <span className="visited-time">{formatDuration(seconds)}</span>
+                        </div>
+                        <div className="bar-wrap">
+                          <div className="bar" style={{ width: `${(seconds / maxChanSecs) * 100}%`, background: '#4f8df5' }} />
+                        </div>
+                        <div className="visited-foot">
+                          <span>{videos} {videos === 1 ? 'video' : 'videos'}</span>
+                          <span className="visited-pct">{pct.toFixed(2)} %</span>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         </>
       )}
