@@ -7,7 +7,7 @@ import { db, type Category } from '../../db';
 import { formatDuration, localDate } from '../../lib/hostname';
 import {
   getYouTubeStats, getYouTubeByCategoryForRange,
-  getTopChannels, getRecentVideos, lastNDays, getTimeByCategory,
+  getTopChannels, getRecentVideos, lastNDays,
   getDailyByCategory, getFocusSessions,
   CATEGORY_KEYS, CATEGORY_COLORS, type CategoryKey,
 } from '../../db/queries';
@@ -17,7 +17,6 @@ import {
 import { exportTimeEntries, exportVideoSessions, exportAll } from '../../lib/export';
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
-const MANUAL_CATS: Category[] = ['productivity', 'social', 'entertainment', 'news', 'education', 'other'];
 type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'whitelist' | 'notifications' | 'settings';
 type RangeTab = 'today' | 'week' | 'month';
 
@@ -66,14 +65,14 @@ function OverviewTab() {
   const [weekSecs, setWeekSecs] = useState(0);
   const [allTimeSecs, setAllTimeSecs] = useState(0);
   const [dailyStacked, setDailyStacked] = useState<Awaited<ReturnType<typeof getDailyByCategory>>>([]);
-  const [topSites, setTopSites] = useState<{ domain: string; seconds: number }[]>([]);
-  const [catData, setCatData] = useState<{ category: string; seconds: number }[]>([]);
+  const [visitedSites, setVisitedSites] = useState<{ domain: string; seconds: number; sessions: number }[]>([]);
+  const [rangeTotal, setRangeTotal] = useState(0);
+  const [sortBy, setSortBy] = useState<'sessions' | 'time'>('time');
   const [domainCats, setDomainCats] = useState<Map<string, Category>>(new Map());
   const [focusSessions, setFocusSessions] = useState<Awaited<ReturnType<typeof getFocusSessions>>>([]);
   const [rangeTab, setRangeTab] = useState<RangeTab>('today');
   const [heat, setHeat] = useState<number[][]>(() => Array.from({ length: 7 }, () => Array(24).fill(0)));
   const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -104,22 +103,33 @@ function OverviewTab() {
         const rangeEntries = rangeTab === 'today' ? todayE
           : rangeTab === 'week' ? weekE
           : all.filter(e => e.date >= monthStart && e.date <= today);
-        const siteMap = new Map<string, number>();
-        for (const e of rangeEntries) siteMap.set(e.domain, (siteMap.get(e.domain) ?? 0) + e.duration);
-        setTopSites(
-          [...siteMap.entries()]
-            .map(([domain, seconds]) => ({ domain, seconds }))
-            .sort((a, b) => b.seconds - a.seconds)
-            .slice(0, 10)
-        );
 
-        const [cats, daily, dCats, focus] = await Promise.all([
-          getTimeByCategory(rangeStart, rangeEnd),
+        // Group by domain; count contiguous "sessions" (a gap > 5 min = a new visit)
+        const SESSION_GAP_MS = 5 * 60 * 1000;
+        const byDomain = new Map<string, { seconds: number; starts: { at: number; dur: number }[] }>();
+        for (const e of rangeEntries) {
+          let g = byDomain.get(e.domain);
+          if (!g) { g = { seconds: 0, starts: [] }; byDomain.set(e.domain, g); }
+          g.seconds += e.duration;
+          g.starts.push({ at: e.startedAt, dur: e.duration });
+        }
+        const sites = [...byDomain.entries()].map(([domain, g]) => {
+          const ordered = g.starts.sort((a, b) => a.at - b.at);
+          let sessions = 0, prevEnd = -Infinity;
+          for (const s of ordered) {
+            if (s.at - prevEnd > SESSION_GAP_MS) sessions++;
+            prevEnd = Math.max(prevEnd, s.at + s.dur * 1000);
+          }
+          return { domain, seconds: g.seconds, sessions };
+        });
+        setVisitedSites(sites);
+        setRangeTotal(sites.reduce((s, x) => s + x.seconds, 0));
+
+        const [daily, dCats, focus] = await Promise.all([
           getDailyByCategory(7),
           db.domainCategories.toArray(),
           getFocusSessions(rangeStart, rangeEnd),
         ]);
-        setCatData(cats);
         setDailyStacked(daily);
         setDomainCats(new Map(dCats.map(d => [d.domain, d.category])));
         setFocusSessions(focus);
@@ -129,16 +139,14 @@ function OverviewTab() {
         setLoading(false);
       }
     })();
-  }, [rangeTab, refreshKey]);
+  }, [rangeTab]);
 
-  async function setDomainCategory(domain: string, category: Category) {
-    await db.domainCategories.put({ domain, category, isManual: true });
-    setRefreshKey(k => k + 1);
-  }
-
-  const maxSecs = topSites[0]?.seconds ?? 1;
-  const maxCatSecs = catData[0]?.seconds ?? 1;
-  const pieData = topSites.slice(0, 6).map(s => ({ name: s.domain, value: s.seconds }));
+  const sortedSites = [...visitedSites].sort((a, b) =>
+    sortBy === 'sessions'
+      ? (b.sessions - a.sessions) || (b.seconds - a.seconds)
+      : (b.seconds - a.seconds)
+  );
+  const maxSecs = sortedSites.reduce((m, s) => Math.max(m, s.seconds), 1);
   const hasActivity = dailyStacked.some(row =>
     CATEGORY_KEYS.some(k => row[k] > 0)
   );
@@ -216,70 +224,50 @@ function OverviewTab() {
         </section>
       )}
 
-      {/* Time by category */}
-      {catData.length > 0 && (
-        <section className="card">
-          <h2 className="card-title">Time by Category</h2>
-          <ul className="site-list">
-            {catData.map(({ category, seconds }) => {
-              const color = CATEGORY_COLORS[category as CategoryKey] ?? '#94a3b8';
+      {/* Visited sites */}
+      <section className="card">
+        <div className="card-header">
+          <h2 className="card-title" style={{ margin: 0 }}>Visited Sites</h2>
+          <RangeTabs value={rangeTab} onChange={setRangeTab} />
+        </div>
+
+        <div className="visited-toolbar">
+          <span className="visited-total">
+            {rangeTab === 'today' ? 'Today' : rangeTab === 'week' ? 'This Week' : 'This Month'} · <strong>{formatDuration(rangeTotal)}</strong>
+          </span>
+          <label className="visited-sort">
+            Sort by
+            <select value={sortBy} onChange={e => setSortBy(e.target.value as 'sessions' | 'time')}>
+              <option value="time">Usage time</option>
+              <option value="sessions">Sessions</option>
+            </select>
+          </label>
+        </div>
+
+        {sortedSites.length === 0 ? <Empty text="No activity for this period." /> : (
+          <ul className="visited-list">
+            {sortedSites.map(({ domain, seconds, sessions }) => {
+              const pct = rangeTotal > 0 ? (seconds / rangeTotal) * 100 : 0;
               return (
-                <li key={category} className="site-row">
-                  <div className="site-name">
-                    <span className="cat-dot" style={{ background: color }} />
-                    <span className="domain-text" style={{ textTransform: 'capitalize' }}>{category}</span>
+                <li key={domain} className="visited-row">
+                  <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`} width={32} height={32} alt="" className="visited-favicon" />
+                  <div className="visited-body">
+                    <div className="visited-head">
+                      <span className="visited-domain">{domain}</span>
+                      <span className="visited-time">{formatDuration(seconds)}</span>
+                    </div>
+                    <div className="bar-wrap">
+                      <div className="bar" style={{ width: `${(seconds / maxSecs) * 100}%`, background: '#4f8df5' }} />
+                    </div>
+                    <div className="visited-foot">
+                      <span className="visited-sessions">{sessions} {sessions === 1 ? 'session' : 'sessions'}</span>
+                      <span className="visited-pct">{pct.toFixed(2)} %</span>
+                    </div>
                   </div>
-                  <div className="bar-wrap">
-                    <div className="bar" style={{ width: `${(seconds / maxCatSecs) * 100}%`, background: color }} />
-                  </div>
-                  <span className="site-time">{formatDuration(seconds)}</span>
                 </li>
               );
             })}
           </ul>
-        </section>
-      )}
-
-      {/* Top sites with category override */}
-      <section className="card">
-        <div className="card-header">
-          <h2 className="card-title" style={{ margin: 0 }}>Top Sites</h2>
-          <RangeTabs value={rangeTab} onChange={setRangeTab} />
-        </div>
-        {topSites.length === 0 ? <Empty text="No activity for this period." /> : (
-          <div className="sites-layout">
-            <ul className="site-list">
-              {topSites.map(({ domain, seconds }, i) => {
-                const cat = domainCats.get(domain);
-                return (
-                  <li key={domain} className="site-row site-row-with-cat">
-                    <div className="site-name">
-                      <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} width={16} height={16} alt="" className="favicon" />
-                      <span className="domain-text">{domain}</span>
-                    </div>
-                    <div className="bar-wrap">
-                      <div className="bar" style={{ width: `${(seconds / maxSecs) * 100}%`, background: cat ? CATEGORY_COLORS[cat as CategoryKey] : COLORS[i % COLORS.length] }} />
-                    </div>
-                    <CategoryPicker
-                      value={cat ?? null}
-                      onChange={c => setDomainCategory(domain, c)}
-                    />
-                    <span className="site-time">{formatDuration(seconds)}</span>
-                  </li>
-                );
-              })}
-            </ul>
-            {pieData.length > 1 && (
-              <div className="pie-wrap">
-                <PieChart width={180} height={180}>
-                  <Pie data={pieData} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} strokeWidth={0}>
-                    {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<PieTooltip />} />
-                </PieChart>
-              </div>
-            )}
-          </div>
         )}
       </section>
     </>
@@ -337,23 +325,6 @@ function CategoryLegend() {
         </span>
       ))}
     </div>
-  );
-}
-
-function CategoryPicker({ value, onChange }: { value: Category | null; onChange: (c: Category) => void }) {
-  return (
-    <select
-      className="cat-picker"
-      value={value ?? ''}
-      onChange={e => e.target.value && onChange(e.target.value as Category)}
-      style={value ? { borderColor: CATEGORY_COLORS[value as CategoryKey], color: '#333' } : undefined}
-      title="Set category"
-    >
-      <option value="" disabled>—</option>
-      {MANUAL_CATS.map(c => (
-        <option key={c} value={c}>{c}</option>
-      ))}
-    </select>
   );
 }
 
@@ -1132,7 +1103,7 @@ export default function App() {
       <aside className="sidebar">
         <button className="logo" onClick={() => setTab('overview')} title="Home" aria-label="Home">⚡ WebPulse</button>
         <nav className="main-tabs">
-          <button className={`main-tab ${tab === 'overview' ? 'main-tab-active' : ''}`} onClick={() => setTab('overview')}>Overview</button>
+          <button className={`main-tab ${tab === 'overview' ? 'main-tab-active' : ''}`} onClick={() => setTab('overview')}>📊 Dashboard</button>
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
             <span className="yt-icon">▶</span> YouTube
           </button>
