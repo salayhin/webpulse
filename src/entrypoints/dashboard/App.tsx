@@ -1071,9 +1071,7 @@ export default function App() {
   return (
     <div className="dashboard">
       <header className="dash-header">
-        <div className="header-left">
-          <span className="logo">⚡ WebPulse</span>
-        </div>
+        <button className="logo" onClick={() => setTab('overview')} title="Home" aria-label="Home">⚡ WebPulse</button>
         <nav className="main-tabs">
           <button className={`main-tab ${tab === 'overview' ? 'main-tab-active' : ''}`} onClick={() => setTab('overview')}>Overview</button>
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
