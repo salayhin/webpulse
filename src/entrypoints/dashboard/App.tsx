@@ -14,7 +14,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-import { exportAll } from '../../lib/export';
+import { exportTimeEntries, exportVideoSessions, exportAll } from '../../lib/export';
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
 const MANUAL_CATS: Category[] = ['productivity', 'social', 'entertainment', 'news', 'education', 'other'];
@@ -580,9 +580,17 @@ function PomodoroTab() {
       <section className="card">
         <h2 className="card-title">Export Data</h2>
         <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
-        <button className="btn btn-primary" onClick={() => exportAll()}>
-          📥 Export All Data
-        </button>
+        <div className="export-buttons">
+          <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
+            📹 Export YouTube Only
+          </button>
+          <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
+            🌐 Export Browsing Only
+          </button>
+          <button className="btn btn-secondary" onClick={() => exportAll()}>
+            📥 Export All Data
+          </button>
+        </div>
       </section>
     </>
   );
