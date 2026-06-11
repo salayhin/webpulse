@@ -18,7 +18,7 @@ import { exportTimeEntries, exportVideoSessions, exportAll } from '../../lib/exp
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
 const MANUAL_CATS: Category[] = ['productivity', 'social', 'entertainment', 'news', 'education', 'other'];
-type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'settings';
+type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'whitelist' | 'notifications' | 'settings';
 type RangeTab = 'today' | 'week' | 'month';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -606,62 +606,28 @@ function SiteRow({ domain, subtext, onDelete, onEdit }: {
 
 const fmtHM = (mins: number) => `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
 
-function SettingsTab() {
+const normalizeDomain = (d: string) => d.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*/, '');
+
+function RestrictionsTab() {
   const [restrictions, setRestrictions] = useState<Array<{ domain: string; dailyLimitSeconds: number }>>([]);
-  const [ignored, setIgnored] = useState<string[]>([]);
-  const [notifyWebsites, setNotifyWebsites] = useState<Array<{ domain: string; intervalMins: number }>>([]);
-  const [notifyDailyEnabled, setNotifyDailyEnabled] = useState(true);
-  const [notifyDailyTime, setNotifyDailyTime] = useState('20:00');
-  const [notifyMessage, setNotifyMessage] = useState('You have spent a lot of time on this site');
   const [loading, setLoading] = useState(true);
   const [limitDomain, setLimitDomain] = useState('');
   const [limitMins, setLimitMins] = useState('60');
   const [completelyBlock, setCompletelyBlock] = useState(false);
   const [editingLimit, setEditingLimit] = useState<string | null>(null);
-  const [whitelistDomain, setWhitelistDomain] = useState('');
-  const [notifyWebsite, setNotifyWebsite] = useState('');
-  const [notifyInterval, setNotifyInterval] = useState('30');
-  const [editingNotify, setEditingNotify] = useState<string | null>(null);
-
-  function startEditNotify(n: { domain: string; intervalMins: number }) {
-    setNotifyWebsite(n.domain);
-    setNotifyInterval(String(n.intervalMins));
-    setEditingNotify(n.domain);
-  }
-
-  async function rescheduleDailyRecap(timeStr: string) {
-    await chrome.alarms.clear('daily-recap');
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    const now = new Date();
-    const next = new Date(now);
-    next.setHours(hours, minutes, 0, 0);
-    if (now > next) next.setDate(next.getDate() + 1);
-    chrome.alarms.create('daily-recap', {
-      delayInMinutes: Math.ceil((next.getTime() - now.getTime()) / 60000),
-      periodInMinutes: 24 * 60,
-    });
-  }
 
   useEffect(() => {
     (async () => {
       try {
         const rests = await db.domainRestrictions.toArray();
         setRestrictions(rests.map(r => ({ domain: r.domain, dailyLimitSeconds: r.dailyLimitSeconds })));
-        const settings = await db.settings.get('default');
-        setIgnored(settings?.ignoredDomains ?? []);
-        setNotifyDailyEnabled(settings?.notifyDailyEnabled ?? true);
-        setNotifyDailyTime(settings?.notifyDailyTime ?? '20:00');
-        setNotifyWebsites(settings?.notifyWebsites ?? []);
-        setNotifyMessage(settings?.notifyMessage ?? 'You have spent a lot of time on this site');
       } catch (err) {
-        console.error('Failed to load settings', err);
+        console.error('Failed to load restrictions', err);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
-
-  const normalizeDomain = (d: string) => d.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*/, '');
 
   async function addLimit() {
     if (!limitDomain.trim()) return;
@@ -698,6 +664,98 @@ function SettingsTab() {
     setEditingLimit(r.domain);
   }
 
+  if (loading) return <div className="loading">Loading…</div>;
+
+  return (
+    <section className="card">
+      <h2 className="card-title">Daily access restrictions for the websites</h2>
+      <p className="card-subtitle">Set the maximum time allowed to visit the website per day. After this time, the site will be blocked.</p>
+      <p className="card-subtitle" style={{ fontSize: '12px', color: '#666' }}>If you set the blocking time to 0 hours 0 minutes, the website will be blocked immediately</p>
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Enter website name..."
+          value={limitDomain}
+          onChange={e => setLimitDomain(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addLimit()}
+          style={{ flex: 1 }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px', opacity: completelyBlock ? 0.5 : 1 }}>
+          <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
+          <input
+            type="time"
+            disabled={completelyBlock}
+            value={String(Math.floor((parseInt(limitMins) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(limitMins) || 0) % 60).padStart(2, '0')}
+            onChange={e => {
+              const [h, m] = e.target.value.split(':');
+              setLimitMins(String(parseInt(h) * 60 + parseInt(m)));
+            }}
+            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
+          />
+          <button
+            onClick={() => setLimitMins('60')}
+            style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}
+          >
+            ✕
+          </button>
+        </div>
+        <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>
+          {editingLimit ? 'Save' : 'Add Website'}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+        <input
+          type="checkbox"
+          id="completely-block"
+          checked={completelyBlock}
+          onChange={e => setCompletelyBlock(e.target.checked)}
+          style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#6366f1' }}
+        />
+        <label htmlFor="completely-block" style={{ fontSize: '13px', color: '#333', cursor: 'pointer' }}>Completely Block</label>
+      </div>
+
+      <div className="entry-box">
+        {restrictions.length > 0 ? (
+          <ul className="entry-list">
+            {restrictions.map(r => (
+              <SiteRow
+                key={r.domain}
+                domain={r.domain}
+                subtext={r.dailyLimitSeconds === 0 ? 'Completely Blocked' : `Limit : ${fmtHM(Math.round(r.dailyLimitSeconds / 60))}`}
+                onDelete={() => removeLimit(r.domain)}
+                onEdit={() => startEditLimit(r)}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="entry-empty">No restrictions yet</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WhitelistTab() {
+  const [ignored, setIgnored] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [whitelistDomain, setWhitelistDomain] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await db.settings.get('default');
+        setIgnored(settings?.ignoredDomains ?? []);
+      } catch (err) {
+        console.error('Failed to load whitelist', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
   async function addWhitelist() {
     if (!whitelistDomain.trim()) return;
     const domain = normalizeDomain(whitelistDomain);
@@ -712,6 +770,85 @@ function SettingsTab() {
     await db.settings.update('default', { ignoredDomains: updated });
     setIgnored(updated);
   }
+
+  if (loading) return <div className="loading">Loading…</div>;
+
+  return (
+    <section className="card">
+      <h2 className="card-title">Activity and spent time for these websites will not be tracked</h2>
+
+      <div className="entry-box">
+        {ignored.length > 0 ? (
+          <ul className="entry-list">
+            {ignored.map(d => (
+              <SiteRow key={d} domain={d} onDelete={() => removeWhitelist(d)} />
+            ))}
+          </ul>
+        ) : (
+          <p className="entry-empty">No whitelisted sites yet</p>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Enter website name..."
+          value={whitelistDomain}
+          onChange={e => setWhitelistDomain(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addWhitelist()}
+          style={{ flex: 1 }}
+        />
+        <button className="btn btn-primary" onClick={addWhitelist} style={{ padding: '8px 20px' }}>Add Website</button>
+      </div>
+    </section>
+  );
+}
+
+function NotificationsTab() {
+  const [notifyWebsites, setNotifyWebsites] = useState<Array<{ domain: string; intervalMins: number }>>([]);
+  const [notifyDailyEnabled, setNotifyDailyEnabled] = useState(true);
+  const [notifyDailyTime, setNotifyDailyTime] = useState('20:00');
+  const [notifyMessage, setNotifyMessage] = useState('You have spent a lot of time on this site');
+  const [loading, setLoading] = useState(true);
+  const [notifyWebsite, setNotifyWebsite] = useState('');
+  const [notifyInterval, setNotifyInterval] = useState('30');
+  const [editingNotify, setEditingNotify] = useState<string | null>(null);
+
+  function startEditNotify(n: { domain: string; intervalMins: number }) {
+    setNotifyWebsite(n.domain);
+    setNotifyInterval(String(n.intervalMins));
+    setEditingNotify(n.domain);
+  }
+
+  async function rescheduleDailyRecap(timeStr: string) {
+    await chrome.alarms.clear('daily-recap');
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(hours, minutes, 0, 0);
+    if (now > next) next.setDate(next.getDate() + 1);
+    chrome.alarms.create('daily-recap', {
+      delayInMinutes: Math.ceil((next.getTime() - now.getTime()) / 60000),
+      periodInMinutes: 24 * 60,
+    });
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await db.settings.get('default');
+        setNotifyDailyEnabled(settings?.notifyDailyEnabled ?? true);
+        setNotifyDailyTime(settings?.notifyDailyTime ?? '20:00');
+        setNotifyWebsites(settings?.notifyWebsites ?? []);
+        setNotifyMessage(settings?.notifyMessage ?? 'You have spent a lot of time on this site');
+      } catch (err) {
+        console.error('Failed to load notification settings', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
   async function addNotifyWebsite() {
     if (!notifyWebsite.trim()) return;
@@ -752,6 +889,7 @@ function SettingsTab() {
   }
 
   useEffect(() => {
+    if (loading) return;
     const timer = setTimeout(() => saveNotificationSettings(), 500);
     return () => clearTimeout(timer);
   }, [notifyDailyEnabled, notifyDailyTime, notifyMessage, notifyWebsites]);
@@ -759,222 +897,122 @@ function SettingsTab() {
   if (loading) return <div className="loading">Loading…</div>;
 
   return (
-    <>
-      {/* Daily Limits */}
-      <section className="card">
-        <h2 className="card-title">Daily access restrictions for the websites</h2>
-        <p className="card-subtitle">Set the maximum time allowed to visit the website per day. After this time, the site will be blocked.</p>
-        <p className="card-subtitle" style={{ fontSize: '12px', color: '#666' }}>If you set the blocking time to 0 hours 0 minutes, the website will be blocked immediately</p>
+    <section className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <input
+          type="checkbox"
+          id="notify-daily"
+          checked={notifyDailyEnabled}
+          onChange={e => setNotifyDailyEnabled(e.target.checked)}
+          style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
+        />
+        <label htmlFor="notify-daily" style={{ fontSize: '15px', fontWeight: '600', color: '#111', cursor: 'pointer', margin: 0 }}>
+          Daily Summary Notifications
+        </label>
+      </div>
+      <p className="card-subtitle" style={{ marginBottom: '16px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Enter website name..."
-            value={limitDomain}
-            onChange={e => setLimitDomain(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addLimit()}
-            style={{ flex: 1 }}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px', opacity: completelyBlock ? 0.5 : 1 }}>
-            <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
-            <input
-              type="time"
-              disabled={completelyBlock}
-              value={String(Math.floor((parseInt(limitMins) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(limitMins) || 0) % 60).padStart(2, '0')}
-              onChange={e => {
-                const [h, m] = e.target.value.split(':');
-                setLimitMins(String(parseInt(h) * 60 + parseInt(m)));
-              }}
-              style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
-            />
-            <button
-              onClick={() => setLimitMins('60')}
-              style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}
-            >
-              ✕
-            </button>
-          </div>
-          <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>
-            {editingLimit ? 'Save' : 'Add Website'}
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <input
-            type="checkbox"
-            id="completely-block"
-            checked={completelyBlock}
-            onChange={e => setCompletelyBlock(e.target.checked)}
-            style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#6366f1' }}
-          />
-          <label htmlFor="completely-block" style={{ fontSize: '13px', color: '#333', cursor: 'pointer' }}>Completely Block</label>
-        </div>
-
-        <div className="entry-box">
-          {restrictions.length > 0 ? (
-            <ul className="entry-list">
-              {restrictions.map(r => (
-                <SiteRow
-                  key={r.domain}
-                  domain={r.domain}
-                  subtext={r.dailyLimitSeconds === 0 ? 'Completely Blocked' : `Limit : ${fmtHM(Math.round(r.dailyLimitSeconds / 60))}`}
-                  onDelete={() => removeLimit(r.domain)}
-                  onEdit={() => startEditLimit(r)}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="entry-empty">No restrictions yet</p>
-          )}
-        </div>
-      </section>
-
-      {/* Whitelist */}
-      <section className="card">
-        <h2 className="card-title">Activity and spent time for these websites will not be tracked</h2>
-
-        <div className="entry-box">
-          {ignored.length > 0 ? (
-            <ul className="entry-list">
-              {ignored.map(d => (
-                <SiteRow key={d} domain={d} onDelete={() => removeWhitelist(d)} />
-              ))}
-            </ul>
-          ) : (
-            <p className="entry-empty">No whitelisted sites yet</p>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Enter website name..."
-            value={whitelistDomain}
-            onChange={e => setWhitelistDomain(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addWhitelist()}
-            style={{ flex: 1 }}
-          />
-          <button className="btn btn-primary" onClick={addWhitelist} style={{ padding: '8px 20px' }}>Add Website</button>
-        </div>
-      </section>
-
-      {/* Notifications */}
-      <section className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-          <input
-            type="checkbox"
-            id="notify-daily"
-            checked={notifyDailyEnabled}
-            onChange={e => setNotifyDailyEnabled(e.target.checked)}
-            style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#6366f1' }}
-          />
-          <label htmlFor="notify-daily" style={{ fontSize: '15px', fontWeight: '600', color: '#111', cursor: 'pointer', margin: 0 }}>
-            Daily Summary Notifications
+      {notifyDailyEnabled && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+          <label style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: '#111' }}>
+            Notification time with summary information about your daily usage
           </label>
-        </div>
-        <p className="card-subtitle" style={{ marginBottom: '16px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
-
-        {notifyDailyEnabled && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
-            <label style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: '#111' }}>
-              Notification time with summary information about your daily usage
-            </label>
-            <input
-              type="time"
-              value={notifyDailyTime}
-              onChange={e => setNotifyDailyTime(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', color: '#111', fontFamily: 'inherit' }}
-            />
-          </div>
-        )}
-
-        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notifications for websites</h3>
-        <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>Show notifications every time you spend a selected period of time on the website</p>
-
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
           <input
-            type="text"
-            className="form-input"
-            placeholder="Enter website name..."
-            value={notifyWebsite}
-            onChange={e => setNotifyWebsite(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && addNotifyWebsite()}
-            style={{ flex: 1 }}
+            type="time"
+            value={notifyDailyTime}
+            onChange={e => setNotifyDailyTime(e.target.value)}
+            style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', color: '#111', fontFamily: 'inherit' }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px' }}>
-            <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
-            <input
-              type="time"
-              value={String(Math.floor((parseInt(notifyInterval) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(notifyInterval) || 0) % 60).padStart(2, '0')}
-              onChange={e => {
-                const [h, m] = e.target.value.split(':');
-                setNotifyInterval(String(parseInt(h) * 60 + parseInt(m)));
-              }}
-              style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
-            />
-            <button
-              onClick={() => setNotifyInterval('30')}
-              style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}
-            >
-              ✕
-            </button>
-          </div>
-          <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>
-            {editingNotify ? 'Save' : 'Add Website'}
-          </button>
         </div>
+      )}
 
-        <div className="entry-box">
-          {notifyWebsites.length > 0 ? (
-            <ul className="entry-list">
-              {notifyWebsites.map(n => (
-                <SiteRow
-                  key={n.domain}
-                  domain={n.domain}
-                  subtext={`Limit : ${fmtHM(n.intervalMins)}`}
-                  onDelete={() => removeNotifyWebsite(n.domain)}
-                  onEdit={() => startEditNotify(n)}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p className="entry-empty">No per-website notifications yet</p>
-          )}
-        </div>
+      <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notifications for websites</h3>
+      <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>Show notifications every time you spend a selected period of time on the website</p>
 
-        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notification message</h3>
-        <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>You will see this message in notification for websites every time</p>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-          <textarea
-            value={notifyMessage}
-            onChange={e => setNotifyMessage(e.target.value)}
-            placeholder="You have spent a lot of time on this site"
-            rows={2}
-            style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', resize: 'vertical' }}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <input
+          type="text"
+          className="form-input"
+          placeholder="Enter website name..."
+          value={notifyWebsite}
+          onChange={e => setNotifyWebsite(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addNotifyWebsite()}
+          style={{ flex: 1 }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px' }}>
+          <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
+          <input
+            type="time"
+            value={String(Math.floor((parseInt(notifyInterval) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(notifyInterval) || 0) % 60).padStart(2, '0')}
+            onChange={e => {
+              const [h, m] = e.target.value.split(':');
+              setNotifyInterval(String(parseInt(h) * 60 + parseInt(m)));
+            }}
+            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
           />
-          <button className="btn btn-primary" onClick={saveNotificationSettings} style={{ padding: '8px 20px', marginTop: '0' }}>Save</button>
+          <button
+            onClick={() => setNotifyInterval('30')}
+            style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}
+          >
+            ✕
+          </button>
         </div>
-      </section>
+        <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>
+          {editingNotify ? 'Save' : 'Add Website'}
+        </button>
+      </div>
 
-      {/* Export Data */}
-      <section className="card">
-        <h2 className="card-title">Export Data</h2>
-        <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
-        <div className="export-buttons">
-          <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
-            📹 Export YouTube Only
-          </button>
-          <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
-            🌐 Export Browsing Only
-          </button>
-          <button className="btn btn-secondary" onClick={() => exportAll()}>
-            📥 Export All Data
-          </button>
-        </div>
-      </section>
-    </>
+      <div className="entry-box">
+        {notifyWebsites.length > 0 ? (
+          <ul className="entry-list">
+            {notifyWebsites.map(n => (
+              <SiteRow
+                key={n.domain}
+                domain={n.domain}
+                subtext={`Limit : ${fmtHM(n.intervalMins)}`}
+                onDelete={() => removeNotifyWebsite(n.domain)}
+                onEdit={() => startEditNotify(n)}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="entry-empty">No per-website notifications yet</p>
+        )}
+      </div>
+
+      <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notification message</h3>
+      <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>You will see this message in notification for websites every time</p>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <textarea
+          value={notifyMessage}
+          onChange={e => setNotifyMessage(e.target.value)}
+          placeholder="You have spent a lot of time on this site"
+          rows={2}
+          style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', resize: 'vertical' }}
+        />
+        <button className="btn btn-primary" onClick={saveNotificationSettings} style={{ padding: '8px 20px', marginTop: '0' }}>Save</button>
+      </div>
+    </section>
+  );
+}
+
+function SettingsTab() {
+  return (
+    <section className="card">
+      <h2 className="card-title">Export Data</h2>
+      <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
+      <div className="export-buttons">
+        <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
+          📹 Export YouTube Only
+        </button>
+        <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
+          🌐 Export Browsing Only
+        </button>
+        <button className="btn btn-secondary" onClick={() => exportAll()}>
+          📥 Export All Data
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1044,6 +1082,15 @@ export default function App() {
           <button className={`main-tab ${tab === 'pomodoro' ? 'main-tab-active' : ''}`} onClick={() => setTab('pomodoro')}>
             ⏱️ Pomodoro
           </button>
+          <button className={`main-tab ${tab === 'restrictions' ? 'main-tab-active' : ''}`} onClick={() => setTab('restrictions')}>
+            🚫 Restrictions
+          </button>
+          <button className={`main-tab ${tab === 'whitelist' ? 'main-tab-active' : ''}`} onClick={() => setTab('whitelist')}>
+            ✅ Whitelist
+          </button>
+          <button className={`main-tab ${tab === 'notifications' ? 'main-tab-active' : ''}`} onClick={() => setTab('notifications')}>
+            🔔 Notifications
+          </button>
           <button className={`main-tab ${tab === 'settings' ? 'main-tab-active' : ''}`} onClick={() => setTab('settings')}>
             ⚙️ Settings
           </button>
@@ -1052,7 +1099,7 @@ export default function App() {
 
       <main className="dash-main">
         <ErrorBoundary>
-          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : tab === 'pomodoro' ? <PomodoroTab /> : <SettingsTab />}
+          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : tab === 'pomodoro' ? <PomodoroTab /> : tab === 'restrictions' ? <RestrictionsTab /> : tab === 'whitelist' ? <WhitelistTab /> : tab === 'notifications' ? <NotificationsTab /> : <SettingsTab />}
         </ErrorBoundary>
       </main>
     </div>
