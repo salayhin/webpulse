@@ -38,6 +38,13 @@ async function ensureOffscreen(): Promise<void> {
   await creatingOffscreen;
 }
 
+async function playPomodoroSound(soundId: string): Promise<void> {
+  await ensureOffscreen();
+  await chrome.runtime
+    .sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', soundId })
+    .catch(() => {});
+}
+
 type AiRequest =
   | { kind: 'domain'; domain: string }
   | { kind: 'video'; title: string; channelName: string };
@@ -299,37 +306,55 @@ export default defineBackground(() => {
       await flushSession();
       await captureCurrentTab();
     } else if (alarm.name === 'pomodoro-work') {
-      // Work session done → transition to rest
+      // Work period finished → start the rest period
       const state = await chrome.storage.local.get('pomodoro');
-      const pom = state.pomodoro || { mode: 'idle', workMins: 25, restMins: 5, sessionsCompleted: 0 };
+      const pom = state.pomodoro || {};
+      const restMins = pom.restMins ?? 5;
+      const rep = pom.currentRep ?? 1;
+      const reps = pom.repetitions ?? 1;
       pom.mode = 'rest';
       pom.startedAt = Date.now();
-      pom.sessionsCompleted = (pom.sessionsCompleted ?? 0) + 1;
       await chrome.storage.local.set({ pomodoro: pom });
-      await ensureOffscreen();
-      await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'work-done' }).catch(() => {});
+      await playPomodoroSound(pom.workSound ?? 's3');
       chrome.notifications.create('pomodoro-work', {
         type: 'basic',
         iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%236366f1"/%3E%3Ctext x="50%%" y="50%%" font-size="28" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E✓%3C/text%3E%3C/svg%3E',
-        title: '🎉 Work session complete!',
-        message: `Take a ${pom.restMins}-minute break. (Session ${pom.sessionsCompleted} done)`,
+        title: '🎉 Work period complete!',
+        message: `Take a ${restMins}-minute break. (Pomodoro ${rep} of ${reps})`,
       });
-      chrome.alarms.create('pomodoro-rest', { delayInMinutes: pom.restMins });
+      chrome.alarms.create('pomodoro-rest', { delayInMinutes: restMins });
     } else if (alarm.name === 'pomodoro-rest') {
-      // Rest session done → back to idle
+      // Rest period finished → next pomodoro, or finish the whole run
       const state = await chrome.storage.local.get('pomodoro');
-      const pom = state.pomodoro || { mode: 'idle', workMins: 25, restMins: 5, sessionsCompleted: 0 };
-      pom.mode = 'idle';
-      pom.startedAt = null;
-      await chrome.storage.local.set({ pomodoro: pom });
-      await ensureOffscreen();
-      await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'rest-done' }).catch(() => {});
-      chrome.notifications.create('pomodoro-rest', {
-        type: 'basic',
-        iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%2334d399"/%3E%3Ctext x="50%%" y="50%%" font-size="28" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E▶%3C/text%3E%3C/svg%3E',
-        title: '⏱️ Break over!',
-        message: 'Ready for another session?',
-      });
+      const pom = state.pomodoro || {};
+      const reps = pom.repetitions ?? 1;
+      const rep = pom.currentRep ?? 1;
+      if (rep < reps) {
+        pom.currentRep = rep + 1;
+        pom.mode = 'work';
+        pom.startedAt = Date.now();
+        await chrome.storage.local.set({ pomodoro: pom });
+        await playPomodoroSound(pom.restSound ?? 's4');
+        chrome.notifications.create('pomodoro-rest', {
+          type: 'basic',
+          iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%2334d399"/%3E%3Ctext x="50%%" y="50%%" font-size="28" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E▶%3C/text%3E%3C/svg%3E',
+          title: '⏱️ Break over!',
+          message: `Back to work — pomodoro ${pom.currentRep} of ${reps}.`,
+        });
+        chrome.alarms.create('pomodoro-work', { delayInMinutes: pom.workMins ?? 25 });
+      } else {
+        pom.mode = 'idle';
+        pom.startedAt = null;
+        pom.currentRep = 0;
+        await chrome.storage.local.set({ pomodoro: pom });
+        await playPomodoroSound(pom.doneSound ?? 's6');
+        chrome.notifications.create('pomodoro-done', {
+          type: 'basic',
+          iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%23fbbf24"/%3E%3Ctext x="50%%" y="50%%" font-size="30" text-anchor="middle" dominant-baseline="central"%3E🏆%3C/text%3E%3C/svg%3E',
+          title: '🏆 All pomodoros complete!',
+          message: `You finished ${reps} ${reps === 1 ? 'pomodoro' : 'pomodoros'}. Great focus!`,
+        });
+      }
     } else if (alarm.name === 'daily-recap') {
       // Daily recap notification at user-configured time
       const settings = await db.settings.get('default');

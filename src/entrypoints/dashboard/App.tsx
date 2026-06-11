@@ -13,6 +13,7 @@ import {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 import { exportTimeEntries, exportVideoSessions, exportAll } from '../../lib/export';
+import { playPreset, SOUND_PRESETS, DEFAULT_WORK_SOUND, DEFAULT_REST_SOUND, DEFAULT_DONE_SOUND } from '../../lib/sounds';
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
 type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'whitelist' | 'notifications' | 'settings';
@@ -516,21 +517,73 @@ interface PomodoroState {
   startedAt: number | null;
   workMins: number;
   restMins: number;
-  sessionsCompleted: number;
+  repetitions: number;
+  currentRep: number;
+  workSound: string;
+  restSound: string;
+  doneSound: string;
+}
+
+const DEFAULT_POM: PomodoroState = {
+  mode: 'idle', startedAt: null, workMins: 25, restMins: 5,
+  repetitions: 3, currentRep: 0,
+  workSound: DEFAULT_WORK_SOUND, restSound: DEFAULT_REST_SOUND, doneSound: DEFAULT_DONE_SOUND,
+};
+
+function SoundSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="sound-row">
+      <span className="sound-label">Sound after complete period</span>
+      <select className="sound-select" value={value} onChange={e => onChange(e.target.value)}>
+        {SOUND_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+      </select>
+      <button type="button" className="sound-listen" onClick={() => playPreset(value)} title="Click to listen">
+        ▶ <span>Click to listen</span>
+      </button>
+    </div>
+  );
+}
+
+function MinutesField({ label, mins, onChange }: { label: string; mins: number; onChange: (m: number) => void }) {
+  const val = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  return (
+    <div className="pom-field">
+      <label className="pom-field-label">{label}</label>
+      <input
+        type="time"
+        className="pom-time-input"
+        value={val}
+        onChange={e => {
+          const [h, m] = e.target.value.split(':').map(Number);
+          onChange((h || 0) * 60 + (m || 0));
+        }}
+      />
+    </div>
+  );
 }
 
 function PomodoroTab() {
-  const [pom, setPom] = useState<PomodoroState>({ mode: 'idle', startedAt: null, workMins: 25, restMins: 5, sessionsCompleted: 0 });
+  const [pom, setPom] = useState<PomodoroState>(DEFAULT_POM);
   const [displaySecs, setDisplaySecs] = useState(0);
-  const [workMinsInput, setWorkMinsInput] = useState('25');
-  const [restMinsInput, setRestMinsInput] = useState('5');
+  // Config inputs (used while idle)
+  const [workMins, setWorkMins] = useState(25);
+  const [restMins, setRestMins] = useState(5);
+  const [reps, setReps] = useState('3');
+  const [workSound, setWorkSound] = useState(DEFAULT_WORK_SOUND);
+  const [restSound, setRestSound] = useState(DEFAULT_REST_SOUND);
+  const [doneSound, setDoneSound] = useState(DEFAULT_DONE_SOUND);
 
   useEffect(() => {
-    // Load initial state
     (async () => {
       const data = await chrome.storage.local.get('pomodoro');
-      const state = data.pomodoro || pom;
+      const state: PomodoroState = { ...DEFAULT_POM, ...(data.pomodoro || {}) };
       setPom(state);
+      setWorkMins(state.workMins);
+      setRestMins(state.restMins);
+      setReps(String(state.repetitions));
+      setWorkSound(state.workSound);
+      setRestSound(state.restSound);
+      setDoneSound(state.doneSound);
     })();
   }, []);
 
@@ -538,11 +591,8 @@ function PomodoroTab() {
     if (pom.mode === 'idle') return;
     const interval = setInterval(async () => {
       const data = await chrome.storage.local.get('pomodoro');
-      const current = data.pomodoro;
-      if (!current || !current.startedAt) {
-        setDisplaySecs(0);
-        return;
-      }
+      const current: PomodoroState | undefined = data.pomodoro;
+      if (!current || !current.startedAt) { setDisplaySecs(0); return; }
       const duration = (current.mode === 'work' ? current.workMins : current.restMins) * 60;
       const elapsed = Math.floor((Date.now() - current.startedAt) / 1000);
       setDisplaySecs(Math.max(0, duration - elapsed));
@@ -551,24 +601,23 @@ function PomodoroTab() {
     return () => clearInterval(interval);
   }, [pom.mode]);
 
-  async function startSession() {
-    const workMin = Math.max(1, parseInt(workMinsInput) || 25);
-    const restMin = Math.max(1, parseInt(restMinsInput) || 5);
+  async function run() {
+    const w = Math.max(1, workMins);
+    const r = Math.max(1, restMins);
+    const n = Math.max(1, parseInt(reps) || 1);
     const state: PomodoroState = {
-      mode: 'work',
-      startedAt: Date.now(),
-      workMins: workMin,
-      restMins: restMin,
-      sessionsCompleted: 0,
+      mode: 'work', startedAt: Date.now(),
+      workMins: w, restMins: r, repetitions: n, currentRep: 1,
+      workSound, restSound, doneSound,
     };
     setPom(state);
     await chrome.storage.local.set({ pomodoro: state });
-    chrome.alarms.create('pomodoro-work', { delayInMinutes: workMin });
-    setDisplaySecs(workMin * 60);
+    chrome.alarms.create('pomodoro-work', { delayInMinutes: w });
+    setDisplaySecs(w * 60);
   }
 
-  async function pauseSession() {
-    const state = { ...pom, mode: 'idle' as const, startedAt: null };
+  async function stop() {
+    const state: PomodoroState = { ...pom, mode: 'idle', startedAt: null, currentRep: 0 };
     setPom(state);
     await chrome.storage.local.set({ pomodoro: state });
     chrome.alarms.clear('pomodoro-work');
@@ -576,84 +625,60 @@ function PomodoroTab() {
     setDisplaySecs(0);
   }
 
-  async function resetSession() {
-    const state = { ...pom, mode: 'idle' as const, startedAt: null, sessionsCompleted: 0 };
-    setPom(state);
-    await chrome.storage.local.set({ pomodoro: state });
-    chrome.alarms.clear('pomodoro-work');
-    chrome.alarms.clear('pomodoro-rest');
-    setDisplaySecs(0);
-  }
+  const formatTime = (secs: number) =>
+    `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 
-  const formatTime = (secs: number): string => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
-
+  const running = pom.mode !== 'idle';
   const modeColor = pom.mode === 'work' ? '#6366f1' : pom.mode === 'rest' ? '#34d399' : '#ccc';
-  const modeLabel = pom.mode === 'work' ? 'Work' : pom.mode === 'rest' ? 'Rest' : 'Idle';
+  const modeLabel = pom.mode === 'work' ? 'Focus' : pom.mode === 'rest' ? 'Break' : 'Idle';
 
   return (
-    <>
-      <section className="card">
-        <h2 className="card-title">Pomodoro Timer</h2>
+    <section className="card">
+      <h2 className="card-title">Pomodoro</h2>
+      <p className="card-subtitle">
+        The Pomodoro method is a time-management technique based on alternating periods of focused work and rest. Classically, work lasts 25 minutes and rest 5 minutes.
+      </p>
 
-        {/* Timer display */}
-        <div className="pomodoro-display" style={{ borderColor: modeColor }}>
-          <div className="pom-time">{formatTime(displaySecs)}</div>
-          <div className="pom-mode">{modeLabel}{pom.mode !== 'idle' && ` (${pom.sessionsCompleted} complete)`}</div>
-        </div>
+      <div className="pom-info">
+        <p>While Pomodoro mode is running, the extension keeps tracking your time — all limits and notifications still work.</p>
+        <p>Clicking <strong>Stop</strong> resets the work and rest time to zero.</p>
+      </div>
 
-        {/* Control buttons */}
-        {pom.mode === 'idle' ? (
-          <>
-            <div className="form-group">
-              <label>Work Duration (min)</label>
-              <input
-                type="number"
-                className="form-input"
-                min="1"
-                max="60"
-                value={workMinsInput}
-                onChange={e => setWorkMinsInput(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Rest Duration (min)</label>
-              <input
-                type="number"
-                className="form-input"
-                min="1"
-                max="30"
-                value={restMinsInput}
-                onChange={e => setRestMinsInput(e.target.value)}
-              />
-            </div>
-            <button className="btn btn-primary btn-large" onClick={startSession}>
-              Start Session
-            </button>
-          </>
-        ) : (
-          <>
-            <div className="pom-buttons">
-              <button className="btn btn-secondary" onClick={pauseSession}>
-                Pause
-              </button>
-              <button className="btn btn-danger" onClick={resetSession}>
-                Reset
-              </button>
-            </div>
-            <p className="pom-note">
-              {pom.mode === 'work'
-                ? '🎯 Focus time. Silence your notifications!'
-                : '☕ Take a break. Stretch, hydrate, rest your eyes.'}
-            </p>
-          </>
-        )}
-      </section>
+      {running ? (
+        <>
+          <div className="pomodoro-display" style={{ borderColor: modeColor }}>
+            <div className="pom-time">{formatTime(displaySecs)}</div>
+            <div className="pom-mode">{modeLabel} · pomodoro {pom.currentRep} of {pom.repetitions}</div>
+          </div>
+          <button className="btn btn-danger btn-large" onClick={stop}>■ Stop</button>
+          <p className="pom-note">
+            {pom.mode === 'work'
+              ? '🎯 Focus time. Silence your notifications!'
+              : '☕ Take a break. Stretch, hydrate, rest your eyes.'}
+          </p>
+        </>
+      ) : (
+        <>
+          <MinutesField label="Period of work" mins={workMins} onChange={setWorkMins} />
+          <SoundSelect value={workSound} onChange={setWorkSound} />
 
-    </>
+          <MinutesField label="Period of rest" mins={restMins} onChange={setRestMins} />
+          <SoundSelect value={restSound} onChange={setRestSound} />
+
+          <div className="pom-field">
+            <label className="pom-field-label">Number of repetitions</label>
+            <input
+              type="number" min="1" max="12" className="pom-reps-input"
+              value={reps}
+              onChange={e => setReps(e.target.value)}
+            />
+          </div>
+          <SoundSelect value={doneSound} onChange={setDoneSound} />
+
+          <button className="btn btn-primary btn-large" onClick={run}>▶ Run</button>
+        </>
+      )}
+    </section>
   );
 }
 

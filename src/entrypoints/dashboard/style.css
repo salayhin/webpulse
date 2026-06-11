@@ -767,3 +767,20 @@ body {
 
 a.visited-link { text-decoration: none; }
 a.visited-link:hover { color: #4f8df5; text-decoration: underline; }
+
+/* ── Pomodoro config ────────────────────────────────────────────────── */
+.pom-info { background: #eef2ff; border-radius: 10px; padding: 16px 18px; margin-bottom: 24px; font-size: 13px; color: #444; line-height: 1.5; }
+.pom-info p { margin: 0 0 8px; }
+.pom-info p:last-child { margin-bottom: 0; }
+.pom-field { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.pom-field-label { font-size: 15px; font-weight: 700; color: #111; min-width: 180px; }
+.pom-time-input, .pom-reps-input {
+  padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px;
+  font-size: 14px; color: #111; font-family: inherit; background: #fff;
+}
+.pom-reps-input { width: 80px; }
+.sound-row { display: flex; align-items: center; gap: 12px; margin: 0 0 20px 0; }
+.sound-label { font-size: 13px; color: #555; min-width: 180px; }
+.sound-select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; color: #111; background: #fff; cursor: pointer; font-family: inherit; min-width: 130px; }
+.sound-listen { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; color: #888; font-size: 13px; padding: 0; font-family: inherit; }
+.sound-listen:hover { color: #4f46e5; }
