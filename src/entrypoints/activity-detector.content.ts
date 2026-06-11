@@ -18,7 +18,8 @@ export default defineContentScript({
     document.addEventListener('click', onActivity, { passive: true });
     document.addEventListener('touchstart', onActivity, { passive: true });
 
-    setInterval(() => {
+    const timer = setInterval(() => {
+      if (!chrome.runtime?.id) { clearInterval(timer); return; }
       if (document.visibilityState !== 'visible') return;
       if (Date.now() - lastActivity >= IDLE_THRESHOLD) return;
       chrome.runtime.sendMessage({ type: 'ACTIVITY_PING' }).catch(() => {});

@@ -353,9 +353,231 @@ body {
 
 .video-dur { margin-left: auto; font-variant-numeric: tabular-nums; }
 
+/* Stacked-chart legend */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  padding-left: 36px;
+  font-size: 12px;
+  color: #666;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Tooltip with multiple rows (stacked chart) */
+.tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #fff;
+  padding: 1px 0;
+}
+
+/* Category pill (focus session row) */
+.cat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+/* Focus sessions list */
+.focus-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.focus-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.focus-row:last-child { border-bottom: none; }
+
+.focus-time {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.focus-when {
+  font-size: 11px;
+  color: #999;
+  font-variant-numeric: tabular-nums;
+  min-width: 80px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Top Sites row with category picker — 4-column grid */
+.site-row-with-cat {
+  grid-template-columns: 170px 1fr 100px 64px;
+}
+
+/* Category picker (inline native select styled as a small pill) */
+.cat-picker {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #f5f5fa;
+  border: 1px solid #e5e5ec;
+  border-radius: 12px;
+  padding: 3px 22px 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #777;
+  cursor: pointer;
+  text-transform: capitalize;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='3'%3e%3cpolyline points='6 9 12 15 18 9'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 8px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.cat-picker:hover { background-color: #eaeaf4; }
+.cat-picker:focus { outline: none; border-color: #6366f1; }
+
+/* Settings form */
+.card-subtitle {
+  font-size: 12px;
+  color: #888;
+  margin: 0 0 16px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #111;
+  font-family: inherit;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-primary {
+  background: #6366f1;
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #5568d3;
+}
+
+.btn-small {
+  padding: 4px 12px;
+  font-size: 11px;
+}
+
+.btn-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.btn-danger:hover {
+  background: #fecaca;
+}
+
+/* Restriction list */
+.restriction-list, .ignore-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.restriction-row, .ignore-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #f9f9fc;
+  border-radius: 8px;
+  border: 1px solid #f0f0f5;
+}
+
+.restriction-row strong {
+  font-size: 13px;
+  color: #111;
+  display: block;
+}
+
+.restriction-limit {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+  display: block;
+}
+
+.ignore-row {
+  flex-direction: row;
+}
+
+.ignore-row span {
+  font-size: 13px;
+  color: #333;
+}
+
 @media (max-width: 600px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .sites-layout { flex-direction: column; }
   .pie-wrap { display: none; }
   .site-row { grid-template-columns: 140px 1fr 56px; }
+  .site-row-with-cat { grid-template-columns: 110px 1fr 80px 56px; }
+  .focus-when { display: none; }
+  .legend { padding-left: 0; }
 }

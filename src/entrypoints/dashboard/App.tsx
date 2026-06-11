@@ -3,34 +3,23 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { db } from '../../db';
+import { db, type Category } from '../../db';
 import { formatDuration, localDate } from '../../lib/hostname';
 import {
   getYouTubeStats, getYouTubeByCategoryForRange,
-  getTopChannels, getRecentVideos, lastNDays,
+  getTopChannels, getRecentVideos, lastNDays, getTimeByCategory,
+  getDailyByCategory, getFocusSessions,
+  CATEGORY_KEYS, CATEGORY_COLORS, type CategoryKey,
 } from '../../db/queries';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
-type MainTab = 'overview' | 'youtube';
+const MANUAL_CATS: Category[] = ['productivity', 'social', 'entertainment', 'news', 'education', 'other'];
+type MainTab = 'overview' | 'youtube' | 'settings';
 type RangeTab = 'today' | 'week' | 'month';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildDays7(): string[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return localDate(d.getTime());
-  });
-}
-
-function dayLabel(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00');
-  if (dateStr === localDate()) return 'Today';
-  return d.toLocaleDateString('en', { weekday: 'short' });
-}
 
 function getRangeForTab(tab: RangeTab): { start: string; end: string } {
   if (tab === 'today') { const t = localDate(); return { start: t, end: t }; }
@@ -39,16 +28,6 @@ function getRangeForTab(tab: RangeTab): { start: string; end: string } {
 }
 
 // ── Custom tooltip ───────────────────────────────────────────────────────────
-
-function BarTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="chart-tooltip">
-      <p className="tooltip-label">{label}</p>
-      <p className="tooltip-value">{formatDuration(payload[0].value * 60)}</p>
-    </div>
-  );
-}
 
 function PieTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
@@ -60,49 +39,96 @@ function PieTooltip({ active, payload }: any) {
   );
 }
 
+function StackedTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0);
+  const nonZero = payload.filter((p: any) => p.value > 0).sort((a: any, b: any) => b.value - a.value);
+  return (
+    <div className="chart-tooltip">
+      <p className="tooltip-label">{label} · {formatDuration(total * 60)} total</p>
+      {nonZero.map((p: any) => (
+        <div key={p.dataKey} className="tooltip-row">
+          <span className="cat-dot" style={{ background: p.color, width: 8, height: 8 }} />
+          <span style={{ textTransform: 'capitalize', flex: 1 }}>{p.dataKey}</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatDuration(p.value * 60)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Overview Tab ─────────────────────────────────────────────────────────────
 
 function OverviewTab() {
   const [todaySecs, setTodaySecs] = useState(0);
   const [weekSecs, setWeekSecs] = useState(0);
   const [allTimeSecs, setAllTimeSecs] = useState(0);
-  const [dailyData, setDailyData] = useState<{ label: string; minutes: number }[]>([]);
+  const [dailyStacked, setDailyStacked] = useState<Awaited<ReturnType<typeof getDailyByCategory>>>([]);
   const [topSites, setTopSites] = useState<{ domain: string; seconds: number }[]>([]);
+  const [catData, setCatData] = useState<{ category: string; seconds: number }[]>([]);
+  const [domainCats, setDomainCats] = useState<Map<string, Category>>(new Map());
+  const [focusSessions, setFocusSessions] = useState<Awaited<ReturnType<typeof getFocusSessions>>>([]);
   const [rangeTab, setRangeTab] = useState<RangeTab>('today');
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     (async () => {
-      const today = localDate();
-      const days7 = buildDays7();
-      const { start: weekStart } = lastNDays(7);
-      const { start: monthStart } = lastNDays(30);
+      try {
+        const today = localDate();
+        const { start: weekStart } = lastNDays(7);
+        const { start: monthStart } = lastNDays(30);
 
-      const all = await db.timeEntries.toArray();
-      const todayE = all.filter(e => e.date === today);
-      const weekE = all.filter(e => e.date >= weekStart && e.date <= today);
+        const all = await db.timeEntries.toArray();
+        const todayE = all.filter(e => e.date === today);
+        const weekE = all.filter(e => e.date >= weekStart && e.date <= today);
 
-      setTodaySecs(todayE.reduce((s, e) => s + e.duration, 0));
-      setWeekSecs(weekE.reduce((s, e) => s + e.duration, 0));
-      setAllTimeSecs(all.reduce((s, e) => s + e.duration, 0));
+        setTodaySecs(todayE.reduce((s, e) => s + e.duration, 0));
+        setWeekSecs(weekE.reduce((s, e) => s + e.duration, 0));
+        setAllTimeSecs(all.reduce((s, e) => s + e.duration, 0));
 
-      const byDate = new Map<string, number>();
-      for (const e of weekE) byDate.set(e.date, (byDate.get(e.date) ?? 0) + e.duration);
-      setDailyData(days7.map(d => ({ label: dayLabel(d), minutes: Math.round((byDate.get(d) ?? 0) / 60) })));
+        const { start: rangeStart, end: rangeEnd } = getRangeForTab(rangeTab);
+        const rangeEntries = rangeTab === 'today' ? todayE
+          : rangeTab === 'week' ? weekE
+          : all.filter(e => e.date >= monthStart && e.date <= today);
+        const siteMap = new Map<string, number>();
+        for (const e of rangeEntries) siteMap.set(e.domain, (siteMap.get(e.domain) ?? 0) + e.duration);
+        setTopSites(
+          [...siteMap.entries()]
+            .map(([domain, seconds]) => ({ domain, seconds }))
+            .sort((a, b) => b.seconds - a.seconds)
+            .slice(0, 10)
+        );
 
-      const rangeEntries = rangeTab === 'today' ? todayE
-        : rangeTab === 'week' ? weekE
-        : all.filter(e => e.date >= monthStart && e.date <= today);
-      const siteMap = new Map<string, number>();
-      for (const e of rangeEntries) siteMap.set(e.domain, (siteMap.get(e.domain) ?? 0) + e.duration);
-      setTopSites([...siteMap.entries()].map(([domain, seconds]) => ({ domain, seconds })).sort((a, b) => b.seconds - a.seconds).slice(0, 10));
-
-      setLoading(false);
+        const [cats, daily, dCats, focus] = await Promise.all([
+          getTimeByCategory(rangeStart, rangeEnd),
+          getDailyByCategory(7),
+          db.domainCategories.toArray(),
+          getFocusSessions(rangeStart, rangeEnd),
+        ]);
+        setCatData(cats);
+        setDailyStacked(daily);
+        setDomainCats(new Map(dCats.map(d => [d.domain, d.category])));
+        setFocusSessions(focus);
+      } catch (err) {
+        console.error('Failed to load overview stats', err);
+      } finally {
+        setLoading(false);
+      }
     })();
-  }, [rangeTab]);
+  }, [rangeTab, refreshKey]);
+
+  async function setDomainCategory(domain: string, category: Category) {
+    await db.domainCategories.put({ domain, category, isManual: true });
+    setRefreshKey(k => k + 1);
+  }
 
   const maxSecs = topSites[0]?.seconds ?? 1;
+  const maxCatSecs = catData[0]?.seconds ?? 1;
   const pieData = topSites.slice(0, 6).map(s => ({ name: s.domain, value: s.seconds }));
+  const hasActivity = dailyStacked.some(row =>
+    CATEGORY_KEYS.some(k => row[k] > 0)
+  );
 
   if (loading) return <div className="loading">Loading…</div>;
 
@@ -114,62 +140,159 @@ function OverviewTab() {
         <StatCard label="All Time" value={formatDuration(allTimeSecs)} />
       </div>
 
+      {/* Stacked daily chart by category */}
       <section className="card">
-        <h2 className="card-title">Daily Activity — Last 7 Days</h2>
-        {dailyData.every(d => d.minutes === 0)
-          ? <Empty text="Browse for a bit and come back." />
-          : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={dailyData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+        <h2 className="card-title">Daily Activity by Category — Last 7 Days</h2>
+        {!hasActivity ? <Empty text="Browse for a bit and come back." /> : (
+          <>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={dailyStacked} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#666' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} unit="m" width={36} />
-                <Tooltip content={<BarTooltip />} cursor={{ fill: '#f5f5ff' }} />
-                <Bar dataKey="minutes" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={48} />
+                <Tooltip content={<StackedTooltip />} cursor={{ fill: '#f5f5ff' }} />
+                {CATEGORY_KEYS.map((k, i) => (
+                  <Bar
+                    key={k}
+                    dataKey={k}
+                    stackId="a"
+                    fill={CATEGORY_COLORS[k]}
+                    radius={i === CATEGORY_KEYS.length - 1 ? [6, 6, 0, 0] : 0}
+                    maxBarSize={48}
+                  />
+                ))}
               </BarChart>
             </ResponsiveContainer>
-          )
-        }
+            <CategoryLegend />
+          </>
+        )}
       </section>
 
+      {/* Focus sessions */}
+      {focusSessions.length > 0 && (
+        <section className="card">
+          <h2 className="card-title">Focus Sessions · {rangeTab}</h2>
+          <ul className="focus-list">
+            {focusSessions.slice(0, 6).map(s => {
+              const cat = domainCats.get(s.domain);
+              return (
+                <li key={`${s.domain}-${s.startedAt}`} className="focus-row">
+                  <img src={`https://www.google.com/s2/favicons?domain=${s.domain}&sz=16`} width={16} height={16} alt="" className="favicon" />
+                  <span className="domain-text" style={{ flex: 1 }}>{s.domain}</span>
+                  {cat && (
+                    <span className="cat-pill" style={{ background: CATEGORY_COLORS[cat as CategoryKey] + '22', color: '#444' }}>
+                      <span className="cat-dot" style={{ background: CATEGORY_COLORS[cat as CategoryKey] }} />
+                      {cat}
+                    </span>
+                  )}
+                  <span className="focus-time">{formatDuration(s.durationSecs)}</span>
+                  <span className="focus-when">
+                    {new Date(s.startedAt).toLocaleString('en', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* Time by category */}
+      {catData.length > 0 && (
+        <section className="card">
+          <h2 className="card-title">Time by Category</h2>
+          <ul className="site-list">
+            {catData.map(({ category, seconds }) => {
+              const color = CATEGORY_COLORS[category as CategoryKey] ?? '#94a3b8';
+              return (
+                <li key={category} className="site-row">
+                  <div className="site-name">
+                    <span className="cat-dot" style={{ background: color }} />
+                    <span className="domain-text" style={{ textTransform: 'capitalize' }}>{category}</span>
+                  </div>
+                  <div className="bar-wrap">
+                    <div className="bar" style={{ width: `${(seconds / maxCatSecs) * 100}%`, background: color }} />
+                  </div>
+                  <span className="site-time">{formatDuration(seconds)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {/* Top sites with category override */}
       <section className="card">
         <div className="card-header">
           <h2 className="card-title" style={{ margin: 0 }}>Top Sites</h2>
           <RangeTabs value={rangeTab} onChange={setRangeTab} />
         </div>
-        {topSites.length === 0
-          ? <Empty text="No activity for this period." />
-          : (
-            <div className="sites-layout">
-              <ul className="site-list">
-                {topSites.map(({ domain, seconds }, i) => (
-                  <li key={domain} className="site-row">
+        {topSites.length === 0 ? <Empty text="No activity for this period." /> : (
+          <div className="sites-layout">
+            <ul className="site-list">
+              {topSites.map(({ domain, seconds }, i) => {
+                const cat = domainCats.get(domain);
+                return (
+                  <li key={domain} className="site-row site-row-with-cat">
                     <div className="site-name">
                       <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`} width={16} height={16} alt="" className="favicon" />
                       <span className="domain-text">{domain}</span>
                     </div>
                     <div className="bar-wrap">
-                      <div className="bar" style={{ width: `${(seconds / maxSecs) * 100}%`, background: COLORS[i % COLORS.length] }} />
+                      <div className="bar" style={{ width: `${(seconds / maxSecs) * 100}%`, background: cat ? CATEGORY_COLORS[cat as CategoryKey] : COLORS[i % COLORS.length] }} />
                     </div>
+                    <CategoryPicker
+                      value={cat ?? null}
+                      onChange={c => setDomainCategory(domain, c)}
+                    />
                     <span className="site-time">{formatDuration(seconds)}</span>
                   </li>
-                ))}
-              </ul>
-              {pieData.length > 1 && (
-                <div className="pie-wrap">
-                  <PieChart width={180} height={180}>
-                    <Pie data={pieData} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} strokeWidth={0}>
-                      {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip content={<PieTooltip />} />
-                  </PieChart>
-                </div>
-              )}
-            </div>
-          )
-        }
+                );
+              })}
+            </ul>
+            {pieData.length > 1 && (
+              <div className="pie-wrap">
+                <PieChart width={180} height={180}>
+                  <Pie data={pieData} dataKey="value" cx={90} cy={90} innerRadius={50} outerRadius={80} strokeWidth={0}>
+                    {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip content={<PieTooltip />} />
+                </PieChart>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </>
+  );
+}
+
+function CategoryLegend() {
+  return (
+    <div className="legend">
+      {CATEGORY_KEYS.filter(k => k !== 'uncategorized').map(k => (
+        <span key={k} className="legend-item">
+          <span className="cat-dot" style={{ background: CATEGORY_COLORS[k] }} />
+          <span style={{ textTransform: 'capitalize' }}>{k}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CategoryPicker({ value, onChange }: { value: Category | null; onChange: (c: Category) => void }) {
+  return (
+    <select
+      className="cat-picker"
+      value={value ?? ''}
+      onChange={e => e.target.value && onChange(e.target.value as Category)}
+      style={value ? { borderColor: CATEGORY_COLORS[value as CategoryKey], color: '#333' } : undefined}
+      title="Set category"
+    >
+      <option value="" disabled>—</option>
+      {MANUAL_CATS.map(c => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
   );
 }
 
@@ -186,18 +309,23 @@ function YouTubeTab() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { start, end } = getRangeForTab(rangeTab);
-      const [s, cats, chans, rec] = await Promise.all([
-        getYouTubeStats(start, end),
-        getYouTubeByCategoryForRange(start, end),
-        getTopChannels(start, end),
-        getRecentVideos(15),
-      ]);
-      setStats(s);
-      setCategories(cats);
-      setChannels(chans);
-      setRecent(rec);
-      setLoading(false);
+      try {
+        const { start, end } = getRangeForTab(rangeTab);
+        const [s, cats, chans, rec] = await Promise.all([
+          getYouTubeStats(start, end),
+          getYouTubeByCategoryForRange(start, end),
+          getTopChannels(start, end),
+          getRecentVideos(15),
+        ]);
+        setStats(s);
+        setCategories(cats);
+        setChannels(chans);
+        setRecent(rec);
+      } catch (err) {
+        console.error('Failed to load YouTube stats', err);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [rangeTab]);
 
@@ -302,6 +430,156 @@ function YouTubeTab() {
   );
 }
 
+// ── Settings Tab ────────────────────────────────────────────────────────────
+
+function SettingsTab() {
+  const [restrictions, setRestrictions] = useState<Array<{ domain: string; dailyLimitSeconds: number }>>([]);
+  const [ignored, setIgnored] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newDomain, setNewDomain] = useState('');
+  const [newLimitMins, setNewLimitMins] = useState('60');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const rests = await db.domainRestrictions.toArray();
+        setRestrictions(rests.map(r => ({ domain: r.domain, dailyLimitSeconds: r.dailyLimitSeconds })));
+        const settings = await db.settings.get('default');
+        setIgnored(settings?.ignoredDomains ?? []);
+      } catch (err) {
+        console.error('Failed to load settings', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function setLimit() {
+    if (!newDomain.trim()) return;
+    const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*/, '');
+    const seconds = Math.max(60, parseInt(newLimitMins) * 60);
+    await db.domainRestrictions.put({ domain, dailyLimitSeconds: seconds });
+    setRestrictions(prev => {
+      const existing = prev.findIndex(r => r.domain === domain);
+      if (existing >= 0) prev[existing] = { domain, dailyLimitSeconds: seconds };
+      else prev.push({ domain, dailyLimitSeconds: seconds });
+      return [...prev];
+    });
+    setNewDomain('');
+    setNewLimitMins('60');
+  }
+
+  async function removeLimit(domain: string) {
+    await db.domainRestrictions.delete(domain);
+    setRestrictions(prev => prev.filter(r => r.domain !== domain));
+  }
+
+  async function toggleIgnore(domain: string) {
+    const updated = ignored.includes(domain)
+      ? ignored.filter(d => d !== domain)
+      : [...ignored, domain];
+    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    setIgnored(updated);
+  }
+
+  async function addIgnore() {
+    if (!newDomain.trim()) return;
+    const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*/, '');
+    const updated = ignored.includes(domain) ? ignored : [...ignored, domain];
+    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    setIgnored(updated);
+    setNewDomain('');
+  }
+
+  if (loading) return <div className="loading">Loading…</div>;
+
+  return (
+    <>
+      {/* Daily Limits */}
+      <section className="card">
+        <h2 className="card-title">Daily Limits</h2>
+        <p className="card-subtitle">Set time limits on sites. You'll be blocked after the limit, with a 15-min defer option.</p>
+
+        <div className="form-group">
+          <label>Domain</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. youtube.com or reddit.com"
+            value={newDomain}
+            onChange={e => setNewDomain(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && setLimit()}
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Daily Limit (minutes)</label>
+          <input
+            type="number"
+            className="form-input"
+            min="1"
+            max="1440"
+            value={newLimitMins}
+            onChange={e => setNewLimitMins(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && setLimit()}
+          />
+        </div>
+
+        <button className="btn btn-primary" onClick={setLimit}>Set Limit</button>
+
+        {restrictions.length > 0 && (
+          <ul className="restriction-list">
+            {restrictions.map(r => (
+              <li key={r.domain} className="restriction-row">
+                <div>
+                  <strong>{r.domain}</strong>
+                  <span className="restriction-limit">{Math.round(r.dailyLimitSeconds / 60)} min/day</span>
+                </div>
+                <button className="btn btn-small btn-danger" onClick={() => removeLimit(r.domain)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Whitelist */}
+      <section className="card">
+        <h2 className="card-title">Whitelist</h2>
+        <p className="card-subtitle">Sites on the whitelist are not tracked at all.</p>
+
+        <div className="form-group">
+          <label>Domain to Whitelist</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="e.g. localhost or internal-app.local"
+            value={newDomain}
+            onChange={e => setNewDomain(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addIgnore()}
+          />
+        </div>
+
+        <button className="btn btn-primary" onClick={addIgnore}>Add to Whitelist</button>
+
+        {ignored.length > 0 && (
+          <ul className="ignore-list">
+            {ignored.map(d => (
+              <li key={d} className="ignore-row">
+                <span>{d}</span>
+                <button className="btn btn-small btn-danger" onClick={() => toggleIgnore(d)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
 // ── Shared small components ──────────────────────────────────────────────────
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -329,6 +607,26 @@ function Empty({ text }: { text: string }) {
   return <p className="empty">{text}</p>;
 }
 
+// ── Error boundary ───────────────────────────────────────────────────────────
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="card" style={{ margin: 24 }}>
+          <h2 className="card-title">Something went wrong</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, color: '#b91c1c' }}>
+            {String(this.state.error?.stack || this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── Root App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -345,11 +643,16 @@ export default function App() {
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
             <span className="yt-icon">▶</span> YouTube
           </button>
+          <button className={`main-tab ${tab === 'settings' ? 'main-tab-active' : ''}`} onClick={() => setTab('settings')}>
+            ⚙️ Settings
+          </button>
         </nav>
       </header>
 
       <main className="dash-main">
-        {tab === 'overview' ? <OverviewTab /> : <YouTubeTab />}
+        <ErrorBoundary>
+          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : <SettingsTab />}
+        </ErrorBoundary>
       </main>
     </div>
   );

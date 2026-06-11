@@ -34,10 +34,23 @@ export interface DomainCategory {
   isManual: boolean;
 }
 
+export interface DomainRestriction {
+  domain: string;        // primary key
+  dailyLimitSeconds: number;
+  deferUntil?: number;   // unix ms; if set and > now, block is deferred
+}
+
+export interface WebPulseSettings {
+  key: 'default';        // single-document pattern
+  ignoredDomains: string[];
+}
+
 class WebPulseDB extends Dexie {
   timeEntries!: Table<TimeEntry>;
   videoSessions!: Table<VideoSession>;
   domainCategories!: Table<DomainCategory>;
+  domainRestrictions!: Table<DomainRestriction>;
+  settings!: Table<WebPulseSettings>;
 
   constructor() {
     super('WebPulseDB');
@@ -46,7 +59,28 @@ class WebPulseDB extends Dexie {
       videoSessions: '++id, videoId, date, channelName, category',
       domainCategories: 'domain',
     });
+    // v2: index startedAt so getRecentVideos() can orderBy it.
+    this.version(2).stores({
+      timeEntries: '++id, domain, date, startedAt',
+      videoSessions: '++id, videoId, date, channelName, category, startedAt',
+      domainCategories: 'domain',
+    });
+    // v3: restrictions + settings for blocking + whitelist (Session 4)
+    this.version(3).stores({
+      timeEntries: '++id, domain, date, startedAt',
+      videoSessions: '++id, videoId, date, channelName, category, startedAt',
+      domainCategories: 'domain',
+      domainRestrictions: 'domain',
+      settings: 'key',
+    });
   }
 }
 
 export const db = new WebPulseDB();
+
+// Ensure settings doc exists
+db.settings.count().then(count => {
+  if (count === 0) {
+    db.settings.put({ key: 'default', ignoredDomains: [] }).catch(() => {});
+  }
+});

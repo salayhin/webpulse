@@ -3,7 +3,6 @@ interface YtMeta {
   title: string;
   channelName: string;
   category: string;
-  startedAt?: number;
 }
 
 export default defineContentScript({
@@ -16,6 +15,24 @@ export default defineContentScript({
     let accumulatedMs = 0;
     let videoEl: HTMLVideoElement | null = null;
 
+    // Head meta tags (genre) describe only the video in the initial HTML —
+    // YouTube does NOT update them on SPA navigation. Content scripts also
+    // can't read page JS (ytInitialPlayerResponse), so live DOM is the source
+    // of truth; the background fills missing categories via on-device AI.
+    const initialVideoId = location.pathname === '/watch'
+      ? new URLSearchParams(location.search).get('v')
+      : null;
+
+    const H1_TITLE = 'ytd-watch-metadata h1 yt-formatted-string';
+    const CHANNEL = 'ytd-video-owner-renderer ytd-channel-name yt-formatted-string#text';
+
+    function domText(selector: string): string | undefined {
+      return (document.querySelector(selector) as HTMLElement | null)?.textContent?.trim() || undefined;
+    }
+    function metaContent(attr: string, value: string): string | undefined {
+      return (document.querySelector(`meta[${attr}="${value}"]`) as HTMLMetaElement | null)?.content || undefined;
+    }
+
     // ── Metadata ───────────────────────────────────────────────────────────
 
     function readMeta(): YtMeta | null {
@@ -23,16 +40,35 @@ export default defineContentScript({
       const videoId = new URLSearchParams(location.search).get('v');
       if (!videoId) return null;
 
-      const ipr = (window as any).ytInitialPlayerResponse;
-      const details = ipr?.videoDetails;
-      const mf = ipr?.microformat?.playerMicroformatRenderer;
+      const docTitle = document.title
+        .replace(/^\(\d+\)\s*/, '')
+        .replace(/ - YouTube$/, '')
+        .trim();
 
       return {
         videoId,
-        title: details?.title ?? document.title.replace(' - YouTube', '').trim(),
-        channelName: mf?.ownerChannelName ?? details?.author ?? 'Unknown',
-        category: mf?.category ?? 'Unknown',
+        title: domText(H1_TITLE) ?? (docTitle || 'Unknown'),
+        channelName: domText(CHANNEL) ?? domText('#owner #channel-name a') ?? 'Unknown',
+        // genre meta is only trustworthy for the full-page-load video
+        category: videoId === initialVideoId
+          ? (metaContent('itemprop', 'genre') ?? 'Unknown')
+          : 'Unknown',
       };
+    }
+
+    // The watch page renders its metadata (h1, channel) shortly after
+    // navigation. Re-read until the h1 is present, updating in place.
+    function refineMeta(videoId: string, attempts = 0) {
+      if (attempts >= 8) return;
+      setTimeout(() => {
+        if (currentMeta?.videoId !== videoId) return;
+        if (!domText(H1_TITLE)) { refineMeta(videoId, attempts + 1); return; }
+        const fresh = readMeta();
+        if (!fresh || fresh.videoId !== videoId) return;
+        currentMeta.title = fresh.title;
+        currentMeta.channelName = fresh.channelName;
+        if (currentMeta.category === 'Unknown') currentMeta.category = fresh.category;
+      }, 600);
     }
 
     // ── Timing ─────────────────────────────────────────────────────────────
@@ -62,12 +98,27 @@ export default defineContentScript({
 
       if (watchedSeconds < 3) return;
 
-      chrome.runtime.sendMessage({
+      sendSession({
         type: 'YOUTUBE_SESSION',
         ...meta,
         startedAt: Date.now() - watchedSeconds * 1000,
         watchedSeconds,
-      }).catch(() => {});
+      });
+    }
+
+    function sendSession(payload: Record<string, unknown>, retried = false) {
+      try {
+        chrome.runtime.sendMessage(payload)
+          .then(() => console.log('[WebPulse] session sent:', payload.title, `${payload.watchedSeconds}s`))
+          .catch((err) => {
+            if (!retried) {
+              // Service worker may have been asleep — retry once
+              setTimeout(() => sendSession(payload, true), 1000);
+            } else {
+              console.warn('[WebPulse] session send failed:', err);
+            }
+          });
+      } catch { /* stale context after extension reload */ }
     }
 
     // ── Video element ──────────────────────────────────────────────────────
@@ -106,7 +157,9 @@ export default defineContentScript({
       currentMeta = meta;
       accumulatedMs = 0;
       sessionStartedAt = null;
+      console.log('[WebPulse] tracking video:', meta.videoId, meta.title);
 
+      refineMeta(meta.videoId);
       findAndAttach();
     }
 
@@ -130,9 +183,14 @@ export default defineContentScript({
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        onPause();
-      } else if (currentMeta && videoEl && !videoEl.paused) {
-        onPlay();
+        flush();
+      } else if (location.pathname === '/watch') {
+        // Restore meta after flush cleared it, then resume timing if playing
+        if (!currentMeta) {
+          currentMeta = readMeta();
+          if (currentMeta) refineMeta(currentMeta.videoId);
+        }
+        if (currentMeta && videoEl && !videoEl.paused) onPlay();
       }
     });
   },
