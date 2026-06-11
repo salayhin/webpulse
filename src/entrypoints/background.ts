@@ -142,12 +142,25 @@ export default defineBackground(async () => {
   // ── Content script messages ──────────────────────────────────────────
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'ACTIVITY_PING') {
-      // Re-capture if SW was idle and missed a resume event
-      if (!activeSession) {
-        captureCurrentTab();
-      }
+      if (!activeSession) captureCurrentTab();
       sendResponse({ ok: true });
+      return false;
     }
+
+    if (message.type === 'YOUTUBE_SESSION') {
+      db.videoSessions.add({
+        videoId: message.videoId,
+        title: message.title,
+        channelName: message.channelName,
+        category: message.category,
+        watchedSeconds: message.watchedSeconds,
+        date: localDate(message.startedAt),
+        startedAt: message.startedAt,
+      }).catch((err: unknown) => console.error('[WebPulse] Failed to save video session:', err));
+      sendResponse({ ok: true });
+      return false;
+    }
+
     return false;
   });
 });

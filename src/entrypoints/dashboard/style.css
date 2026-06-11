@@ -241,6 +241,118 @@ body {
   color: #fff;
 }
 
+/* Main tab nav */
+.main-tabs {
+  display: flex;
+  gap: 2px;
+  background: #f0f0f5;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.main-tab {
+  border: none;
+  background: transparent;
+  padding: 6px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #777;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.main-tab-active {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+}
+
+.main-tab:not(.main-tab-active):hover { color: #333; }
+
+.yt-icon { font-size: 11px; color: #ff0000; }
+.main-tab-active .yt-icon { color: #ff0000; }
+
+.range-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+/* Category dot */
+.cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Channel initial badge */
+.channel-initial {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* Video list */
+.video-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.video-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f3f3f3;
+}
+
+.video-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.video-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111;
+  text-decoration: none;
+  line-height: 1.4;
+}
+
+.video-title:hover { color: #6366f1; text-decoration: underline; }
+
+.video-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #888;
+}
+
+.video-channel { color: #555; font-weight: 500; }
+
+.video-cat {
+  background: #f0f0f5;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.video-dur { margin-left: auto; font-variant-numeric: tabular-nums; }
+
 @media (max-width: 600px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .sites-layout { flex-direction: column; }
