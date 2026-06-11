@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Cell, Pie, PieChart, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Cell, Pie, PieChart, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { db, type TimeEntry } from '../../db';
 import { localDate } from '../../lib/hostname';
 
@@ -138,35 +138,38 @@ function Tabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }): Reac
 function Donut({ data, size = 220 }: { data: SiteAgg[]; size?: number }): React.ReactElement {
   const top = data.slice(0, 10);
   const pieData = top.map(d => ({ name: d.domain, value: d.seconds }));
+  // Use fixed width/height on PieChart instead of ResponsiveContainer.
+  // ResponsiveContainer measures via ResizeObserver and can fire with
+  // width/height = -1 on the popup's very first paint, which produces the
+  // "width(-1) and height(-1)" Recharts warning. The donut is a known size
+  // so we can skip auto-sizing entirely.
   return (
     <div className="donut-wrap">
       <div className="donut" style={{ width: size, height: size }}>
-        <ResponsiveContainer>
-          <PieChart>
-            <Pie
-              data={pieData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius="58%"
-              outerRadius="100%"
-              paddingAngle={1.5}
-              stroke="#fff"
-              strokeWidth={2}
-              isAnimationActive={false}
-            >
-              {pieData.map((_, i) => (
-                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip
-              formatter={(v: number) => fmtDur(v)}
-              contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
-              itemStyle={{ color: '#fff' }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+        <PieChart width={size} height={size}>
+          <Pie
+            data={pieData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            innerRadius="58%"
+            outerRadius="100%"
+            paddingAngle={1.5}
+            stroke="#fff"
+            strokeWidth={2}
+            isAnimationActive={false}
+          >
+            {pieData.map((_, i) => (
+              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(v: number) => fmtDur(v)}
+            contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
+            itemStyle={{ color: '#fff' }}
+          />
+        </PieChart>
       </div>
       <ul className="legend">
         {top.map((d, i) => (
@@ -466,19 +469,20 @@ function DailyTab(): React.ReactElement {
         <p className="empty">No activity in this range.</p>
       ) : (
         <div className="bar-chart">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} tickFormatter={fmtDur} width={70} />
-              <Tooltip
-                formatter={(v: number) => fmtDur(v)}
-                labelStyle={{ color: '#fff' }}
-                contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
-              />
-              <Bar dataKey="secs" fill="#6366f1" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {/* Popup body is 440px and .pop-main has 14px horizontal padding,
+              so the chart area is exactly 412px — pass it explicitly to
+              avoid ResponsiveContainer's initial -1×-1 measurement glitch. */}
+          <BarChart width={412} height={260} data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+            <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} tickFormatter={fmtDur} width={70} />
+            <Tooltip
+              formatter={(v: number) => fmtDur(v)}
+              labelStyle={{ color: '#fff' }}
+              contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
+            />
+            <Bar dataKey="secs" fill="#6366f1" radius={[2, 2, 0, 0]} />
+          </BarChart>
         </div>
       )}
 
