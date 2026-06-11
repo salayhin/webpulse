@@ -71,7 +71,7 @@ function OverviewTab() {
   const [domainCats, setDomainCats] = useState<Map<string, Category>>(new Map());
   const [focusSessions, setFocusSessions] = useState<Awaited<ReturnType<typeof getFocusSessions>>>([]);
   const [rangeTab, setRangeTab] = useState<RangeTab>('today');
-  const [hourly, setHourly] = useState<{ hour: string; minutes: number }[]>([]);
+  const [heat, setHeat] = useState<number[][]>(() => Array.from({ length: 7 }, () => Array(24).fill(0)));
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -90,11 +90,15 @@ function OverviewTab() {
         setWeekSecs(weekE.reduce((s, e) => s + e.duration, 0));
         setAllTimeSecs(all.reduce((s, e) => s + e.duration, 0));
 
-        // Per-hour buckets for today (minutes), bucketed by each entry's start hour
-        const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: String(h), minutes: 0 }));
-        for (const e of todayE) buckets[new Date(e.startedAt).getHours()].minutes += e.duration / 60;
-        for (const b of buckets) b.minutes = Math.round(b.minutes * 10) / 10;
-        setHourly(buckets);
+        // Hour × weekday heatmap (minutes), aggregated across all data.
+        // Rows: Mon(0)…Sun(6); cols: hour 0…23. Bucketed by each entry's start time.
+        const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
+        for (const e of all) {
+          const d = new Date(e.startedAt);
+          const row = (d.getDay() + 6) % 7; // JS Sun=0 → Mon-first ordering
+          matrix[row][d.getHours()] += e.duration / 60;
+        }
+        setHeat(matrix);
 
         const { start: rangeStart, end: rangeEnd } = getRangeForTab(rangeTab);
         const rangeEntries = rangeTab === 'today' ? todayE
@@ -149,25 +153,11 @@ function OverviewTab() {
         <StatCard label="All Time" value={formatDuration(allTimeSecs)} />
       </div>
 
-      {/* Hourly chart — time during the day by the hour */}
+      {/* Activity heatmap — when you're active by hour of day and day of week */}
       <section className="card">
-        <p className="card-subtitle" style={{ marginTop: 0, marginBottom: 12 }}>This is a chart of time during the day by the hour</p>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={hourly} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-            <XAxis dataKey="hour" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} interval={0} />
-            <YAxis
-              domain={[0, 60]}
-              ticks={[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]}
-              tick={{ fontSize: 11, fill: '#666' }}
-              axisLine={false}
-              tickLine={false}
-              width={32}
-            />
-            <Tooltip cursor={{ fill: '#f5f5ff' }} formatter={(v: any) => [`${v} min`, 'Time']} labelFormatter={(h: any) => `${h}:00`} />
-            <Bar dataKey="minutes" fill="#6366f1" radius={[3, 3, 0, 0]} maxBarSize={28} />
-          </BarChart>
-        </ResponsiveContainer>
+        <h2 className="card-title" style={{ marginBottom: 4 }}>Activity by hour &amp; day</h2>
+        <p className="card-subtitle" style={{ marginTop: 0, marginBottom: 16 }}>When you're most active across the week — darker means more time spent</p>
+        <HourWeekdayHeatmap data={heat} />
       </section>
 
       {/* Stacked daily chart by category */}
@@ -293,6 +283,47 @@ function OverviewTab() {
         )}
       </section>
     </>
+  );
+}
+
+function HourWeekdayHeatmap({ data }: { data: number[][] }) {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const max = Math.max(1, ...data.flat());
+  const cellColor = (v: number) => {
+    if (v <= 0) return '#f1f1f6';
+    const alpha = 0.18 + 0.82 * (v / max);
+    return `rgba(99, 102, 241, ${alpha.toFixed(3)})`;
+  };
+
+  return (
+    <div className="heatmap">
+      <div className="heatmap-grid">
+        <div className="hm-corner" />
+        {Array.from({ length: 24 }, (_, h) => (
+          <div key={`h${h}`} className="hm-hour">{h % 3 === 0 ? h : ''}</div>
+        ))}
+        {days.map((day, r) => (
+          <React.Fragment key={day}>
+            <div className="hm-day">{day}</div>
+            {data[r].map((v, c) => (
+              <div
+                key={c}
+                className="hm-cell"
+                style={{ background: cellColor(v) }}
+                title={`${day} ${String(c).padStart(2, '0')}:00 · ${v > 0 ? formatDuration(Math.round(v * 60)) : 'no activity'}`}
+              />
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+      <div className="hm-legend">
+        <span>less</span>
+        {['#f1f1f6', 'rgba(99,102,241,0.3)', 'rgba(99,102,241,0.55)', 'rgba(99,102,241,0.8)', 'rgba(99,102,241,1)'].map(bg => (
+          <span key={bg} className="hm-swatch" style={{ background: bg }} />
+        ))}
+        <span>more</span>
+      </div>
+    </div>
   );
 }
 
