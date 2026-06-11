@@ -38,6 +38,13 @@ export default function App() {
         <span className="total">{formatDuration(total)} today</span>
       </header>
 
+      <button
+        className="dash-btn"
+        onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') })}
+      >
+        Open Dashboard →
+      </button>
+
       {loading ? (
         <p className="empty">Loading…</p>
       ) : sites.length === 0 ? (

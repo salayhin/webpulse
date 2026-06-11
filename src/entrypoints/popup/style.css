@@ -33,6 +33,23 @@ header {
   color: #666;
 }
 
+.dash-btn {
+  display: block;
+  width: 100%;
+  padding: 7px 0;
+  margin-bottom: 12px;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+}
+
+.dash-btn:hover { background: #4f46e5; }
+
 .empty {
   color: #999;
   margin: 8px 0;
