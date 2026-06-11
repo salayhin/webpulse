@@ -3,44 +3,37 @@ import { localDate } from '../../lib/hostname';
 
 const params = new URLSearchParams(location.search);
 const domain = params.get('domain') || 'this site';
-const reason = params.get('reason') || '';
+const blockedUrl = params.get('url') || `https://${domain}`;
+const limitSeconds = parseInt(params.get('limit') || '0', 10);
+const sessions = params.get('sessions') || '0';
+const deferAvailable = params.get('defer') === '1';
 
-document.getElementById('domain')!.textContent = domain;
+(document.getElementById('domain') as HTMLElement).textContent = domain;
+(document.getElementById('favicon') as HTMLImageElement).src =
+  `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`;
+(document.getElementById('url') as HTMLElement).textContent = blockedUrl;
 
-// Show reset time (midnight)
-const today = new Date(localDate() + 'T00:00:00');
-const tomorrow = new Date(today);
-tomorrow.setDate(tomorrow.getDate() + 1);
-const resetTime = tomorrow.toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
-document.getElementById('resetTime')!.textContent = `at ${resetTime}`;
+const h = Math.floor(limitSeconds / 3600);
+const m = Math.floor((limitSeconds % 3600) / 60);
+(document.getElementById('limit') as HTMLElement).textContent = `${h} h ${String(m).padStart(2, '0')} m`;
+(document.getElementById('sessions') as HTMLElement).textContent = sessions;
 
-async function defer() {
-  const domain = params.get('domain');
-  if (!domain) return;
+const btn = document.getElementById('postpone') as HTMLButtonElement;
+const note = document.getElementById('postpone-note') as HTMLElement;
 
-  const deferUntil = Date.now() + 15 * 60 * 1000; // 15 minutes from now
-  const restriction = await db.domainRestrictions.get(domain);
-  if (restriction) {
-    await db.domainRestrictions.put({ ...restriction, deferUntil });
-  }
-
-  // Go back to the domain
-  location.href = `https://${domain}`;
+if (deferAvailable) {
+  btn.classList.remove('hidden');
+  note.classList.remove('hidden');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const restriction = await db.domainRestrictions.get(domain);
+    if (restriction) {
+      await db.domainRestrictions.put({
+        ...restriction,
+        deferUntil: Date.now() + 5 * 60 * 1000,
+        deferUsedDate: localDate(),
+      });
+    }
+    location.href = blockedUrl;
+  });
 }
-
-// Make defer accessible globally
-(window as any).defer = defer;
-
-// Update dashboard URL once extension loads
-chrome.runtime.onConnect.addListener(() => {
-  const dashUrl = `chrome-extension://${chrome.runtime.id}/dashboard.html`;
-  const settingsLink = document.querySelector('a');
-  if (settingsLink) settingsLink.href = dashUrl;
-});
-
-// Attempt to update dashboard link immediately if runtime is ready
-try {
-  const dashUrl = `chrome-extension://${chrome.runtime.id}/dashboard.html`;
-  const settingsLink = document.querySelector('a');
-  if (settingsLink) settingsLink.href = dashUrl;
-} catch {}
