@@ -35,9 +35,10 @@ export interface DomainCategory {
 }
 
 export interface DomainRestriction {
-  domain: string;        // primary key
-  dailyLimitSeconds: number;
-  deferUntil?: number;   // unix ms; if set and > now, block is deferred
+  domain: string;             // primary key
+  dailyLimitSeconds: number;  // 0 = completely blocked
+  deferUntil?: number;        // unix ms; block postponed while > now
+  deferUsedDate?: string;     // YYYY-MM-DD; "+5 minutes" already used this day
 }
 
 export interface WebPulseSettings {
@@ -79,6 +80,16 @@ class WebPulseDB extends Dexie {
     });
     // v4: notification settings (Session 5)
     this.version(4).stores({
+      timeEntries: '++id, domain, date, startedAt',
+      videoSessions: '++id, videoId, date, channelName, category, startedAt',
+      domainCategories: 'domain',
+      domainRestrictions: 'domain',
+      settings: 'key',
+    });
+    // v5: deferUsedDate on domainRestrictions (non-indexed field; version bump
+    // kept for explicit migration history). dailyLimitSeconds = 0 now means
+    // "completely blocked".
+    this.version(5).stores({
       timeEntries: '++id, domain, date, startedAt',
       videoSessions: '++id, videoId, date, channelName, category, startedAt',
       domainCategories: 'domain',
