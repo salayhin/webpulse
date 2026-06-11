@@ -31,6 +31,95 @@ export const DEFAULT_WORK_SOUND = 's3';
 export const DEFAULT_REST_SOUND = 's4';
 export const DEFAULT_DONE_SOUND = 's6';
 
+// ── Ambient background sounds (looped while the Pomodoro timer runs) ─────────
+
+export interface AmbientOption { id: string; label: string; }
+
+export const AMBIENT_OPTIONS: AmbientOption[] = [
+  { id: 'none', label: 'None' },
+  { id: 'white', label: 'White noise' },
+  { id: 'brown', label: 'Brown noise' },
+  { id: 'tick', label: 'Clock tick-tock' },
+];
+
+export const DEFAULT_AMBIENT = 'none';
+
+export interface AmbientHandle { stop(): void; }
+
+/**
+ * Start a continuously-looping ambient sound. Returns a handle whose stop()
+ * fades out and releases the audio context, or null for 'none'/unavailable.
+ */
+export function startAmbient(id: string): AmbientHandle | null {
+  if (!id || id === 'none') return null;
+  const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+  if (!Ctx) return null;
+  const ctx: AudioContext = new Ctx();
+
+  const master = ctx.createGain();
+  master.connect(ctx.destination);
+  const targetGain = id === 'tick' ? 0.5 : 0.12;
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(targetGain, ctx.currentTime + 0.4);
+
+  let tickTimer: ReturnType<typeof setInterval> | undefined;
+  let node: AudioBufferSourceNode | undefined;
+
+  if (id === 'white' || id === 'brown') {
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    if (id === 'white') {
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    } else {
+      let last = 0;
+      for (let i = 0; i < data.length; i++) {
+        const w = Math.random() * 2 - 1;
+        last = (last + 0.02 * w) / 1.02;
+        data[i] = last * 3.5;
+      }
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = id === 'brown' ? 500 : 8000;
+    src.connect(lp);
+    lp.connect(master);
+    src.start();
+    node = src;
+  } else if (id === 'tick') {
+    // Alternating tick / tock clicks, twice per second — like an analog watch
+    let tock = false;
+    const click = () => {
+      const t = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = tock ? 1100 : 1500;
+      tock = !tock;
+      osc.connect(g);
+      g.connect(master);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.6, t + 0.001);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+      osc.start(t);
+      osc.stop(t + 0.05);
+    };
+    click();
+    tickTimer = setInterval(click, 500);
+  }
+
+  return {
+    stop() {
+      try { master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2); } catch { /* ctx may be closing */ }
+      if (tickTimer) clearInterval(tickTimer);
+      if (node) { try { node.stop(ctx.currentTime + 0.25); } catch { /* already stopped */ } }
+      setTimeout(() => ctx.close().catch(() => {}), 400);
+    },
+  };
+}
+
 /** Play a preset by id. No-op if Web Audio is unavailable. */
 export function playPreset(id: string): void {
   const preset = SOUND_PRESETS.find(p => p.id === id) ?? SOUND_PRESETS[0];

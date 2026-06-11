@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
@@ -13,7 +13,10 @@ import {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 import { exportTimeEntries, exportVideoSessions, exportAll } from '../../lib/export';
-import { playPreset, SOUND_PRESETS, DEFAULT_WORK_SOUND, DEFAULT_REST_SOUND, DEFAULT_DONE_SOUND } from '../../lib/sounds';
+import {
+  playPreset, startAmbient, SOUND_PRESETS, AMBIENT_OPTIONS, type AmbientHandle,
+  DEFAULT_WORK_SOUND, DEFAULT_REST_SOUND, DEFAULT_DONE_SOUND, DEFAULT_AMBIENT,
+} from '../../lib/sounds';
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
 type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'whitelist' | 'notifications' | 'settings';
@@ -522,13 +525,36 @@ interface PomodoroState {
   workSound: string;
   restSound: string;
   doneSound: string;
+  ambientSound: string;
 }
 
 const DEFAULT_POM: PomodoroState = {
   mode: 'idle', startedAt: null, workMins: 25, restMins: 5,
   repetitions: 3, currentRep: 0,
   workSound: DEFAULT_WORK_SOUND, restSound: DEFAULT_REST_SOUND, doneSound: DEFAULT_DONE_SOUND,
+  ambientSound: DEFAULT_AMBIENT,
 };
+
+function AmbientSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const preview = useRef<AmbientHandle | null>(null);
+  function listen() {
+    preview.current?.stop();
+    preview.current = startAmbient(value);
+    if (preview.current) setTimeout(() => preview.current?.stop(), 2500);
+  }
+  useEffect(() => () => preview.current?.stop(), []);
+  return (
+    <div className="sound-row">
+      <span className="sound-label">Background sound while running</span>
+      <select className="sound-select" value={value} onChange={e => onChange(e.target.value)}>
+        {AMBIENT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <button type="button" className="sound-listen" onClick={listen} disabled={value === 'none'} title="Click to listen">
+        ▶ <span>Click to listen</span>
+      </button>
+    </div>
+  );
+}
 
 function SoundSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
@@ -572,6 +598,7 @@ function PomodoroTab() {
   const [workSound, setWorkSound] = useState(DEFAULT_WORK_SOUND);
   const [restSound, setRestSound] = useState(DEFAULT_REST_SOUND);
   const [doneSound, setDoneSound] = useState(DEFAULT_DONE_SOUND);
+  const [ambient, setAmbient] = useState(DEFAULT_AMBIENT);
 
   useEffect(() => {
     (async () => {
@@ -584,6 +611,7 @@ function PomodoroTab() {
       setWorkSound(state.workSound);
       setRestSound(state.restSound);
       setDoneSound(state.doneSound);
+      setAmbient(state.ambientSound);
     })();
   }, []);
 
@@ -601,6 +629,14 @@ function PomodoroTab() {
     return () => clearInterval(interval);
   }, [pom.mode]);
 
+  // Looping ambient sound while the timer is running (plays in this tab)
+  const running = pom.mode !== 'idle';
+  useEffect(() => {
+    if (!running || pom.ambientSound === 'none') return;
+    const handle = startAmbient(pom.ambientSound);
+    return () => handle?.stop();
+  }, [running, pom.ambientSound]);
+
   async function run() {
     const w = Math.max(1, workMins);
     const r = Math.max(1, restMins);
@@ -608,7 +644,7 @@ function PomodoroTab() {
     const state: PomodoroState = {
       mode: 'work', startedAt: Date.now(),
       workMins: w, restMins: r, repetitions: n, currentRep: 1,
-      workSound, restSound, doneSound,
+      workSound, restSound, doneSound, ambientSound: ambient,
     };
     setPom(state);
     await chrome.storage.local.set({ pomodoro: state });
@@ -628,7 +664,6 @@ function PomodoroTab() {
   const formatTime = (secs: number) =>
     `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
 
-  const running = pom.mode !== 'idle';
   const modeColor = pom.mode === 'work' ? '#6366f1' : pom.mode === 'rest' ? '#34d399' : '#ccc';
   const modeLabel = pom.mode === 'work' ? 'Focus' : pom.mode === 'rest' ? 'Break' : 'Idle';
 
@@ -674,6 +709,8 @@ function PomodoroTab() {
             />
           </div>
           <SoundSelect value={doneSound} onChange={setDoneSound} />
+
+          <AmbientSelect value={ambient} onChange={setAmbient} />
 
           <button className="btn btn-primary btn-large" onClick={run}>▶ Run</button>
         </>
