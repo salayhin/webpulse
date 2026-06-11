@@ -43,6 +43,10 @@ export interface DomainRestriction {
 export interface WebPulseSettings {
   key: 'default';        // single-document pattern
   ignoredDomains: string[];
+  notifyDailyEnabled?: boolean;
+  notifyDailyTime?: string;
+  notifyWebsites?: Array<{ domain: string; intervalMins: number }>;
+  notifyMessage?: string;
 }
 
 class WebPulseDB extends Dexie {
@@ -73,6 +77,14 @@ class WebPulseDB extends Dexie {
       domainRestrictions: 'domain',
       settings: 'key',
     });
+    // v4: notification settings (Session 5)
+    this.version(4).stores({
+      timeEntries: '++id, domain, date, startedAt',
+      videoSessions: '++id, videoId, date, channelName, category, startedAt',
+      domainCategories: 'domain',
+      domainRestrictions: 'domain',
+      settings: 'key',
+    });
   }
 }
 
@@ -81,6 +93,13 @@ export const db = new WebPulseDB();
 // Ensure settings doc exists
 db.settings.count().then(count => {
   if (count === 0) {
-    db.settings.put({ key: 'default', ignoredDomains: [] }).catch(() => {});
+    db.settings.put({
+      key: 'default',
+      ignoredDomains: [],
+      notifyDailyEnabled: true,
+      notifyDailyTime: '20:00',
+      notifyWebsites: [],
+      notifyMessage: 'You have spent a lot of time on this site',
+    }).catch(() => {});
   }
 });

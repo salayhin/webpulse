@@ -283,16 +283,19 @@ export default defineBackground(() => {
         message: 'Ready for another session?',
       });
     } else if (alarm.name === 'daily-recap') {
-      // 8 PM daily recap notification
-      const today = localDate();
-      const entries = await db.timeEntries.where('date').equals(today).toArray();
-      const totalMins = Math.round(entries.reduce((s, e) => s + e.duration, 0) / 60);
-      chrome.notifications.create('daily-recap', {
-        type: 'basic',
-        iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%23f87171"/%3E%3Ctext x="50%%" y="50%%" font-size="20" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E📊%3C/text%3E%3C/svg%3E',
-        title: '📊 Daily recap',
-        message: `You spent ${totalMins} minutes browsing today. Great job!`,
-      });
+      // Daily recap notification at user-configured time
+      const settings = await db.settings.get('default');
+      if (settings?.notifyDailyEnabled) {
+        const today = localDate();
+        const entries = await db.timeEntries.where('date').equals(today).toArray();
+        const totalMins = Math.round(entries.reduce((s, e) => s + e.duration, 0) / 60);
+        chrome.notifications.create('daily-recap', {
+          type: 'basic',
+          iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%23f87171"/%3E%3Ctext x="50%%" y="50%%" font-size="20" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E📊%3C/text%3E%3C/svg%3E',
+          title: '📊 Daily recap',
+          message: `You spent ${totalMins} minutes browsing today. Great job!`,
+        });
+      }
     }
   });
 
@@ -344,10 +347,13 @@ export default defineBackground(() => {
       chrome.alarms.create('heartbeat', { periodInMinutes: 1 });
     }
     if (!dailyRecap) {
-      // Fire at 8 PM every day (set to fire in ~1s if already past 8 PM today)
+      // Fire at user-configured time each day (default 8 PM)
+      const settings = await db.settings.get('default');
+      const timeStr = settings?.notifyDailyTime || '20:00';
+      const [hours, minutes] = timeStr.split(':').map(Number);
       const now = new Date();
       const tonight = new Date(now);
-      tonight.setHours(20, 0, 0, 0);
+      tonight.setHours(hours, minutes, 0, 0);
       if (now > tonight) tonight.setDate(tonight.getDate() + 1);
       const delayMs = tonight.getTime() - now.getTime();
       chrome.alarms.create('daily-recap', { delayInMinutes: Math.ceil(delayMs / 60000), periodInMinutes: 24 * 60 });
@@ -356,3 +362,26 @@ export default defineBackground(() => {
     await captureCurrentTab();
   })();
 });
+
+// ── Per-website notification tracking ────────────────────────────────────
+const domainSessionStartTime = new Map<string, number>();
+
+async function checkWebsiteNotifications(domain: string, currentSessionSeconds: number): Promise<void> {
+  const settings = await db.settings.get('default');
+  const notifyWebsites = settings?.notifyWebsites ?? [];
+
+  const notifyConfig = notifyWebsites.find((n: any) => n.domain === domain);
+  if (!notifyConfig) return;
+
+  const thresholdSeconds = notifyConfig.intervalMins * 60;
+  const notifyMessage = settings?.notifyMessage ?? 'You have spent a lot of time on this site';
+
+  if (currentSessionSeconds > 0 && currentSessionSeconds % thresholdSeconds === 0) {
+    chrome.notifications.create(`notify-${domain}`, {
+      type: 'basic',
+      iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%236366f1"/%3E%3Ctext x="50%25" y="50%25" font-size="32" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E⏱%3C/text%3E%3C/svg%3E',
+      title: `📌 ${domain}`,
+      message: notifyMessage,
+    });
+  }
+}
