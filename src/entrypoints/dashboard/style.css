@@ -693,3 +693,14 @@ body {
   .focus-when { display: none; }
   .legend { padding-left: 0; }
 }
+
+/* ── Settings entry rows (mockup style) ─────────────────────────────── */
+.entry-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.entry-row { padding: 2px 0; }
+.entry-head { display: flex; align-items: center; gap: 12px; }
+.icon-btn { background: none; border: none; cursor: pointer; font-size: 15px; padding: 0; line-height: 1; }
+.icon-btn.icon-delete { color: #e74c3c; font-weight: 700; font-size: 18px; }
+.entry-domain { font-size: 14px; color: #111; }
+.entry-sub { font-size: 13px; color: #888; margin-top: 4px; margin-left: 64px; }
+.entry-box { border: 1px solid #e5e5ec; border-radius: 10px; padding: 16px; background: #fff; min-height: 150px; margin-bottom: 16px; }
+.entry-empty { color: #999; text-align: center; margin: 0; line-height: 150px; }

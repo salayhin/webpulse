@@ -582,6 +582,30 @@ function PomodoroTab() {
 
 // ── Settings Tab ────────────────────────────────────────────────────────────
 
+function SiteRow({ domain, subtext, onDelete, onEdit }: {
+  domain: string;
+  subtext?: string;
+  onDelete: () => void;
+  onEdit?: () => void;
+}) {
+  return (
+    <li className="entry-row">
+      <div className="entry-head">
+        <button className="icon-btn icon-delete" title="Remove" onClick={onDelete}>✕</button>
+        {onEdit && <button className="icon-btn" title="Edit" onClick={onEdit}>✏️</button>}
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`}
+          width={16} height={16} alt="" className="favicon"
+        />
+        <strong className="entry-domain">{domain}</strong>
+      </div>
+      {subtext && <div className="entry-sub">{subtext}</div>}
+    </li>
+  );
+}
+
+const fmtHM = (mins: number) => `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
+
 function SettingsTab() {
   const [restrictions, setRestrictions] = useState<Array<{ domain: string; dailyLimitSeconds: number }>>([]);
   const [ignored, setIgnored] = useState<string[]>([]);
@@ -592,9 +616,31 @@ function SettingsTab() {
   const [loading, setLoading] = useState(true);
   const [limitDomain, setLimitDomain] = useState('');
   const [limitMins, setLimitMins] = useState('60');
+  const [completelyBlock, setCompletelyBlock] = useState(false);
+  const [editingLimit, setEditingLimit] = useState<string | null>(null);
   const [whitelistDomain, setWhitelistDomain] = useState('');
   const [notifyWebsite, setNotifyWebsite] = useState('');
   const [notifyInterval, setNotifyInterval] = useState('30');
+  const [editingNotify, setEditingNotify] = useState<string | null>(null);
+
+  function startEditNotify(n: { domain: string; intervalMins: number }) {
+    setNotifyWebsite(n.domain);
+    setNotifyInterval(String(n.intervalMins));
+    setEditingNotify(n.domain);
+  }
+
+  async function rescheduleDailyRecap(timeStr: string) {
+    await chrome.alarms.clear('daily-recap');
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(hours, minutes, 0, 0);
+    if (now > next) next.setDate(next.getDate() + 1);
+    chrome.alarms.create('daily-recap', {
+      delayInMinutes: Math.ceil((next.getTime() - now.getTime()) / 60000),
+      periodInMinutes: 24 * 60,
+    });
+  }
 
   useEffect(() => {
     (async () => {
@@ -620,55 +666,79 @@ function SettingsTab() {
   async function addLimit() {
     if (!limitDomain.trim()) return;
     const domain = normalizeDomain(limitDomain);
-    const seconds = Math.max(60, parseInt(limitMins) * 60);
+    const seconds = completelyBlock ? 0 : Math.max(0, (parseInt(limitMins) || 0) * 60);
+    // put() intentionally drops deferUntil/deferUsedDate — editing a limit resets today's postpone
     await db.domainRestrictions.put({ domain, dailyLimitSeconds: seconds });
-    setRestrictions(prev => {
-      const idx = prev.findIndex(r => r.domain === domain);
-      if (idx >= 0) prev[idx] = { domain, dailyLimitSeconds: seconds };
-      else prev.push({ domain, dailyLimitSeconds: seconds });
-      return [...prev];
-    });
+    if (editingLimit && editingLimit !== domain) {
+      await db.domainRestrictions.delete(editingLimit);
+    }
+    const rests = await db.domainRestrictions.toArray();
+    setRestrictions(rests.map(r => ({ domain: r.domain, dailyLimitSeconds: r.dailyLimitSeconds })));
     setLimitDomain('');
     setLimitMins('60');
+    setCompletelyBlock(false);
+    setEditingLimit(null);
   }
 
   async function removeLimit(domain: string) {
     await db.domainRestrictions.delete(domain);
     setRestrictions(prev => prev.filter(r => r.domain !== domain));
+    if (editingLimit === domain) {
+      setEditingLimit(null);
+      setLimitDomain('');
+      setLimitMins('60');
+      setCompletelyBlock(false);
+    }
+  }
+
+  function startEditLimit(r: { domain: string; dailyLimitSeconds: number }) {
+    setLimitDomain(r.domain);
+    setLimitMins(String(Math.round(r.dailyLimitSeconds / 60)));
+    setCompletelyBlock(r.dailyLimitSeconds === 0);
+    setEditingLimit(r.domain);
   }
 
   async function addWhitelist() {
     if (!whitelistDomain.trim()) return;
     const domain = normalizeDomain(whitelistDomain);
     const updated = ignored.includes(domain) ? ignored : [...ignored, domain];
-    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    await db.settings.update('default', { ignoredDomains: updated });
     setIgnored(updated);
     setWhitelistDomain('');
   }
 
   async function removeWhitelist(domain: string) {
     const updated = ignored.filter(d => d !== domain);
-    await db.settings.put({ key: 'default', ignoredDomains: updated });
+    await db.settings.update('default', { ignoredDomains: updated });
     setIgnored(updated);
   }
 
   async function addNotifyWebsite() {
     if (!notifyWebsite.trim()) return;
     const domain = normalizeDomain(notifyWebsite);
-    const intervalMins = Math.max(1, parseInt(notifyInterval));
-    const updated = notifyWebsites.find(n => n.domain === domain)
-      ? notifyWebsites.map(n => n.domain === domain ? { domain, intervalMins } : n)
+    const intervalMins = Math.max(1, parseInt(notifyInterval) || 30);
+    let updated = notifyWebsites.find(n => n.domain === domain)
+      ? notifyWebsites.map(n => (n.domain === domain ? { domain, intervalMins } : n))
       : [...notifyWebsites, { domain, intervalMins }];
+    if (editingNotify && editingNotify !== domain) {
+      updated = updated.filter(n => n.domain !== editingNotify);
+    }
     setNotifyWebsites(updated);
     await db.settings.update('default', { notifyWebsites: updated });
     setNotifyWebsite('');
     setNotifyInterval('30');
+    setEditingNotify(null);
   }
 
   async function removeNotifyWebsite(domain: string) {
     const updated = notifyWebsites.filter(n => n.domain !== domain);
     setNotifyWebsites(updated);
     await db.settings.update('default', { notifyWebsites: updated });
+    if (editingNotify === domain) {
+      setEditingNotify(null);
+      setNotifyWebsite('');
+      setNotifyInterval('30');
+    }
   }
 
   async function saveNotificationSettings() {
@@ -678,6 +748,7 @@ function SettingsTab() {
       notifyWebsites,
       notifyMessage,
     });
+    await rescheduleDailyRecap(notifyDailyTime);
   }
 
   useEffect(() => {
@@ -695,7 +766,7 @@ function SettingsTab() {
         <p className="card-subtitle">Set the maximum time allowed to visit the website per day. After this time, the site will be blocked.</p>
         <p className="card-subtitle" style={{ fontSize: '12px', color: '#666' }}>If you set the blocking time to 0 hours 0 minutes, the website will be blocked immediately</p>
 
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
           <input
             type="text"
             className="form-input"
@@ -705,11 +776,12 @@ function SettingsTab() {
             onKeyDown={e => e.key === 'Enter' && addLimit()}
             style={{ flex: 1 }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f9f9fc', border: '1px solid #ddd', borderRadius: '8px', padding: '6px 10px', opacity: completelyBlock ? 0.5 : 1 }}>
             <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
             <input
               type="time"
-              value={String(Math.floor(parseInt(limitMins) / 60)).padStart(2, '0') + ':' + String(parseInt(limitMins) % 60).padStart(2, '0')}
+              disabled={completelyBlock}
+              value={String(Math.floor((parseInt(limitMins) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(limitMins) || 0) % 60).padStart(2, '0')}
               onChange={e => {
                 const [h, m] = e.target.value.split(':');
                 setLimitMins(String(parseInt(h) * 60 + parseInt(m)));
@@ -723,24 +795,37 @@ function SettingsTab() {
               ✕
             </button>
           </div>
-          <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>Add Website</button>
+          <button className="btn btn-primary" onClick={addLimit} style={{ padding: '8px 20px' }}>
+            {editingLimit ? 'Save' : 'Add Website'}
+          </button>
         </div>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <input
+            type="checkbox"
+            id="completely-block"
+            checked={completelyBlock}
+            onChange={e => setCompletelyBlock(e.target.checked)}
+            style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#6366f1' }}
+          />
+          <label htmlFor="completely-block" style={{ fontSize: '13px', color: '#333', cursor: 'pointer' }}>Completely Block</label>
+        </div>
+
+        <div className="entry-box">
           {restrictions.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {restrictions.map(r => (
-                <li key={r.domain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <div>
-                    <strong style={{ fontSize: '13px', color: '#111', display: 'block' }}>{r.domain}</strong>
-                    <span style={{ fontSize: '11px', color: '#888' }}>{Math.round(r.dailyLimitSeconds / 60)} min/day</span>
-                  </div>
-                  <button className="btn btn-small btn-danger" onClick={() => removeLimit(r.domain)}>Remove</button>
-                </li>
+                <SiteRow
+                  key={r.domain}
+                  domain={r.domain}
+                  subtext={r.dailyLimitSeconds === 0 ? 'Completely Blocked' : `Limit : ${fmtHM(Math.round(r.dailyLimitSeconds / 60))}`}
+                  onDelete={() => removeLimit(r.domain)}
+                  onEdit={() => startEditLimit(r)}
+                />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No restrictions yet</p>
+            <p className="entry-empty">No restrictions yet</p>
           )}
         </div>
       </section>
@@ -749,18 +834,15 @@ function SettingsTab() {
       <section className="card">
         <h2 className="card-title">Activity and spent time for these websites will not be tracked</h2>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div className="entry-box">
           {ignored.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {ignored.map(d => (
-                <li key={d} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <span style={{ fontSize: '13px', color: '#333' }}>{d}</span>
-                  <button className="btn btn-small btn-danger" onClick={() => removeWhitelist(d)}>Remove</button>
-                </li>
+                <SiteRow key={d} domain={d} onDelete={() => removeWhitelist(d)} />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No whitelisted sites yet</p>
+            <p className="entry-empty">No whitelisted sites yet</p>
           )}
         </div>
 
@@ -792,21 +874,23 @@ function SettingsTab() {
             Daily Summary Notifications
           </label>
         </div>
-        <p className="card-subtitle" style={{ marginBottom: '12px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
+        <p className="card-subtitle" style={{ marginBottom: '16px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
 
         {notifyDailyEnabled && (
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: '#333', marginBottom: '8px' }}>Notification time with summary information about your daily usage</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+            <label style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: '#111' }}>
+              Notification time with summary information about your daily usage
+            </label>
             <input
               type="time"
               value={notifyDailyTime}
               onChange={e => setNotifyDailyTime(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', width: '100px' }}
+              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', color: '#111', fontFamily: 'inherit' }}
             />
           </div>
         )}
 
-        <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#111', margin: '16px 0 8px', textTransform: 'capitalize' }}>Notifications for websites</h3>
+        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notifications for websites</h3>
         <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>Show notifications every time you spend a selected period of time on the website</p>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
@@ -823,7 +907,7 @@ function SettingsTab() {
             <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
             <input
               type="time"
-              value={String(Math.floor(parseInt(notifyInterval) / 60)).padStart(2, '0') + ':' + String(parseInt(notifyInterval) % 60).padStart(2, '0')}
+              value={String(Math.floor((parseInt(notifyInterval) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(notifyInterval) || 0) % 60).padStart(2, '0')}
               onChange={e => {
                 const [h, m] = e.target.value.split(':');
                 setNotifyInterval(String(parseInt(h) * 60 + parseInt(m)));
@@ -837,32 +921,37 @@ function SettingsTab() {
               ✕
             </button>
           </div>
-          <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>Add Website</button>
+          <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>
+            {editingNotify ? 'Save' : 'Add Website'}
+          </button>
         </div>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div className="entry-box">
           {notifyWebsites.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {notifyWebsites.map(n => (
-                <li key={n.domain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <span style={{ fontSize: '13px', color: '#333' }}>{n.domain} · {n.intervalMins}min</span>
-                  <button className="btn btn-small btn-danger" onClick={() => removeNotifyWebsite(n.domain)}>Remove</button>
-                </li>
+                <SiteRow
+                  key={n.domain}
+                  domain={n.domain}
+                  subtext={`Limit : ${fmtHM(n.intervalMins)}`}
+                  onDelete={() => removeNotifyWebsite(n.domain)}
+                  onEdit={() => startEditNotify(n)}
+                />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No per-website notifications yet</p>
+            <p className="entry-empty">No per-website notifications yet</p>
           )}
         </div>
 
-        <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#111', margin: '0 0 8px', textTransform: 'capitalize' }}>Notification message</h3>
+        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notification message</h3>
         <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>You will see this message in notification for websites every time</p>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
           <textarea
             value={notifyMessage}
             onChange={e => setNotifyMessage(e.target.value)}
             placeholder="You have spent a lot of time on this site"
-            rows={3}
+            rows={2}
             style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', resize: 'vertical' }}
           />
           <button className="btn btn-primary" onClick={saveNotificationSettings} style={{ padding: '8px 20px', marginTop: '0' }}>Save</button>

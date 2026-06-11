@@ -319,6 +319,10 @@ webpulse/                              # lives at ~/projects/data-lab/webpulse
 - Daily recap time is user-configurable (default 8 PM)
 - CSV includes all data ever recorded (clients handle pagination/filtering)
 - Notifications appear only if users allow `chrome.notifications` permission
+- 2026-06-11: Settings/blocking/notifications redesigned to mockups — per-website
+  notifications now fire (cumulative daily, chrome.storage notifyState), complete
+  block (limit 0), +5 min postpone once/day, whitelist no longer wipes settings.
+  See docs/superpowers/specs/2026-06-11-settings-blocking-notifications-design.md
 
 ---
 

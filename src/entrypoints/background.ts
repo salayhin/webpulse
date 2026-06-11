@@ -2,6 +2,8 @@ import { db, type Category } from '../db';
 import { extractHostname, localDate } from '../lib/hostname';
 import { categorizeDomain, categorizeYouTubeTitle, DOMAIN_CATS } from '../lib/ai-categorize';
 import { staticCategorize } from '../lib/classifier';
+import { evaluateRestriction } from '../lib/blocking';
+import { dueNotifyMultiple } from '../lib/notify-logic';
 
 interface ActiveSession {
   tabId: number;
@@ -86,6 +88,41 @@ async function categorizeDomainOnce(domain: string): Promise<void> {
   }
 }
 
+const NOTIFY_ICON = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%236366f1"/%3E%3Ctext x="50%25" y="50%25" font-size="32" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E⏱%3C/text%3E%3C/svg%3E';
+
+async function checkWebsiteNotifications(domain: string): Promise<void> {
+  try {
+    const settings = await db.settings.get('default');
+    const cfg = settings?.notifyWebsites?.find(n => n.domain === domain);
+    if (!cfg) return;
+
+    const today = localDate();
+    const todayEntries = await db.timeEntries.where('date').equals(today).toArray();
+    const cumulative = todayEntries
+      .filter(e => e.domain === domain)
+      .reduce((s, e) => s + e.duration, 0);
+
+    const stored = await chrome.storage.local.get('notifyState');
+    const notifyState: Record<string, { date: string; lastMultiple: number }> =
+      stored.notifyState ?? {};
+
+    const due = dueNotifyMultiple(cfg.intervalMins, cumulative, notifyState[domain], today);
+    if (due === null) return;
+
+    notifyState[domain] = { date: today, lastMultiple: due };
+    await chrome.storage.local.set({ notifyState });
+
+    chrome.notifications.create(`notify-${domain}-${today}-${due}`, {
+      type: 'basic',
+      iconUrl: NOTIFY_ICON,
+      title: `📌 ${domain}`,
+      message: settings?.notifyMessage || 'You have spent a lot of time on this site',
+    });
+  } catch (err) {
+    console.warn('[WebPulse] website notification check failed:', err);
+  }
+}
+
 async function flushSession(now = Date.now()): Promise<void> {
   if (!activeSession) return;
   const session = activeSession;
@@ -103,41 +140,43 @@ async function flushSession(now = Date.now()): Promise<void> {
       wasAudible: session.wasAudible,
     });
     void categorizeDomainOnce(session.domain);
+    void checkWebsiteNotifications(session.domain);
   } catch (err) {
     console.error('[WebPulse] Failed to save time entry:', err);
   }
 }
 
-async function checkRestrictions(domain: string): Promise<{ blocked: boolean; reason?: string } | null> {
+interface BlockInfo {
+  blocked: boolean;
+  limitSeconds: number;
+  sessions: number;       // today's visit count for the domain
+  deferAvailable: boolean;
+}
+
+async function checkRestrictions(domain: string): Promise<BlockInfo | null> {
   const [restriction, settings] = await Promise.all([
     db.domainRestrictions.get(domain),
     db.settings.get('default'),
   ]);
 
-  // Skip whitelist check
+  // Whitelisted domains are never tracked or blocked
   if (settings?.ignoredDomains.includes(domain)) return null;
+  if (!restriction) return null;
 
-  // Check daily limit
-  if (restriction) {
-    const now = Date.now();
-    if (restriction.deferUntil && restriction.deferUntil > now) {
-      return null; // deferred, allow access
-    }
+  const today = localDate();
+  const todayEntries = await db.timeEntries.where('date').equals(today).toArray();
+  const domainEntries = todayEntries.filter(e => e.domain === domain);
+  const todayUsed = domainEntries.reduce((s, e) => s + e.duration, 0);
 
-    const today = localDate();
-    const todayEntries = await db.timeEntries.where('date').equals(today).toArray();
-    const todayUsed = todayEntries
-      .filter(e => e.domain === domain)
-      .reduce((s, e) => s + e.duration, 0);
+  const decision = evaluateRestriction(restriction, todayUsed, Date.now(), today);
+  if (!decision.blocked) return null;
 
-    if (todayUsed >= restriction.dailyLimitSeconds) {
-      const resetMs = new Date(today).getTime() + 24 * 3600 * 1000;
-      const minutesLeft = Math.ceil((resetMs - now) / 60000);
-      return { blocked: true, reason: `Daily limit reached. Resets in ${minutesLeft}m.` };
-    }
-  }
-
-  return null;
+  return {
+    blocked: true,
+    limitSeconds: restriction.dailyLimitSeconds,
+    sessions: domainEntries.length,
+    deferAvailable: decision.deferAvailable,
+  };
 }
 
 async function startSession(tabId: number, url: string | undefined, audible: boolean): Promise<void> {
@@ -155,8 +194,15 @@ async function startSession(tabId: number, url: string | undefined, audible: boo
   // Check restrictions and enforce block
   const blockStatus = await checkRestrictions(domain);
   if (blockStatus?.blocked) {
+    const q = new URLSearchParams({
+      domain,
+      url,
+      limit: String(blockStatus.limitSeconds),
+      sessions: String(blockStatus.sessions),
+      defer: blockStatus.deferAvailable ? '1' : '0',
+    });
     chrome.tabs.update(tabId, {
-      url: `chrome-extension://${chrome.runtime.id}/block.html?domain=${encodeURIComponent(domain)}&reason=${encodeURIComponent(blockStatus.reason || '')}`,
+      url: `chrome-extension://${chrome.runtime.id}/block.html?${q}`,
     }).catch(() => {});
     return;
   }
@@ -260,6 +306,7 @@ export default defineBackground(() => {
       pom.startedAt = Date.now();
       pom.sessionsCompleted = (pom.sessionsCompleted ?? 0) + 1;
       await chrome.storage.local.set({ pomodoro: pom });
+      await ensureOffscreen();
       await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'work-done' }).catch(() => {});
       chrome.notifications.create('pomodoro-work', {
         type: 'basic',
@@ -275,6 +322,7 @@ export default defineBackground(() => {
       pom.mode = 'idle';
       pom.startedAt = null;
       await chrome.storage.local.set({ pomodoro: pom });
+      await ensureOffscreen();
       await chrome.runtime.sendMessage({ target: 'webpulse-offscreen', kind: 'pomodoro-sound', type: 'rest-done' }).catch(() => {});
       chrome.notifications.create('pomodoro-rest', {
         type: 'basic',
@@ -362,26 +410,3 @@ export default defineBackground(() => {
     await captureCurrentTab();
   })();
 });
-
-// ── Per-website notification tracking ────────────────────────────────────
-const domainSessionStartTime = new Map<string, number>();
-
-async function checkWebsiteNotifications(domain: string, currentSessionSeconds: number): Promise<void> {
-  const settings = await db.settings.get('default');
-  const notifyWebsites = settings?.notifyWebsites ?? [];
-
-  const notifyConfig = notifyWebsites.find((n: any) => n.domain === domain);
-  if (!notifyConfig) return;
-
-  const thresholdSeconds = notifyConfig.intervalMins * 60;
-  const notifyMessage = settings?.notifyMessage ?? 'You have spent a lot of time on this site';
-
-  if (currentSessionSeconds > 0 && currentSessionSeconds % thresholdSeconds === 0) {
-    chrome.notifications.create(`notify-${domain}`, {
-      type: 'basic',
-      iconUrl: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Ccircle cx="32" cy="32" r="30" fill="%236366f1"/%3E%3Ctext x="50%25" y="50%25" font-size="32" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central"%3E⏱%3C/text%3E%3C/svg%3E',
-      title: `📌 ${domain}`,
-      message: notifyMessage,
-    });
-  }
-}
