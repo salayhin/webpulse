@@ -621,6 +621,26 @@ function SettingsTab() {
   const [whitelistDomain, setWhitelistDomain] = useState('');
   const [notifyWebsite, setNotifyWebsite] = useState('');
   const [notifyInterval, setNotifyInterval] = useState('30');
+  const [editingNotify, setEditingNotify] = useState<string | null>(null);
+
+  function startEditNotify(n: { domain: string; intervalMins: number }) {
+    setNotifyWebsite(n.domain);
+    setNotifyInterval(String(n.intervalMins));
+    setEditingNotify(n.domain);
+  }
+
+  async function rescheduleDailyRecap(timeStr: string) {
+    await chrome.alarms.clear('daily-recap');
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(hours, minutes, 0, 0);
+    if (now > next) next.setDate(next.getDate() + 1);
+    chrome.alarms.create('daily-recap', {
+      delayInMinutes: Math.ceil((next.getTime() - now.getTime()) / 60000),
+      periodInMinutes: 24 * 60,
+    });
+  }
 
   useEffect(() => {
     (async () => {
@@ -696,20 +716,29 @@ function SettingsTab() {
   async function addNotifyWebsite() {
     if (!notifyWebsite.trim()) return;
     const domain = normalizeDomain(notifyWebsite);
-    const intervalMins = Math.max(1, parseInt(notifyInterval));
-    const updated = notifyWebsites.find(n => n.domain === domain)
-      ? notifyWebsites.map(n => n.domain === domain ? { domain, intervalMins } : n)
+    const intervalMins = Math.max(1, parseInt(notifyInterval) || 30);
+    let updated = notifyWebsites.find(n => n.domain === domain)
+      ? notifyWebsites.map(n => (n.domain === domain ? { domain, intervalMins } : n))
       : [...notifyWebsites, { domain, intervalMins }];
+    if (editingNotify && editingNotify !== domain) {
+      updated = updated.filter(n => n.domain !== editingNotify);
+    }
     setNotifyWebsites(updated);
     await db.settings.update('default', { notifyWebsites: updated });
     setNotifyWebsite('');
     setNotifyInterval('30');
+    setEditingNotify(null);
   }
 
   async function removeNotifyWebsite(domain: string) {
     const updated = notifyWebsites.filter(n => n.domain !== domain);
     setNotifyWebsites(updated);
     await db.settings.update('default', { notifyWebsites: updated });
+    if (editingNotify === domain) {
+      setEditingNotify(null);
+      setNotifyWebsite('');
+      setNotifyInterval('30');
+    }
   }
 
   async function saveNotificationSettings() {
@@ -719,6 +748,7 @@ function SettingsTab() {
       notifyWebsites,
       notifyMessage,
     });
+    await rescheduleDailyRecap(notifyDailyTime);
   }
 
   useEffect(() => {
@@ -844,21 +874,23 @@ function SettingsTab() {
             Daily Summary Notifications
           </label>
         </div>
-        <p className="card-subtitle" style={{ marginBottom: '12px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
+        <p className="card-subtitle" style={{ marginBottom: '16px' }}>At the end of each day, you will receive a notification with a summary of your daily usage</p>
 
         {notifyDailyEnabled && (
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', color: '#333', marginBottom: '8px' }}>Notification time with summary information about your daily usage</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+            <label style={{ flex: 1, fontSize: '15px', fontWeight: '600', color: '#111' }}>
+              Notification time with summary information about your daily usage
+            </label>
             <input
               type="time"
               value={notifyDailyTime}
               onChange={e => setNotifyDailyTime(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', width: '100px' }}
+              style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '14px', color: '#111', fontFamily: 'inherit' }}
             />
           </div>
         )}
 
-        <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#111', margin: '16px 0 8px', textTransform: 'capitalize' }}>Notifications for websites</h3>
+        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notifications for websites</h3>
         <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>Show notifications every time you spend a selected period of time on the website</p>
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
@@ -875,7 +907,7 @@ function SettingsTab() {
             <span style={{ fontSize: '12px', color: '#666' }}>📅</span>
             <input
               type="time"
-              value={String(Math.floor(parseInt(notifyInterval) / 60)).padStart(2, '0') + ':' + String(parseInt(notifyInterval) % 60).padStart(2, '0')}
+              value={String(Math.floor((parseInt(notifyInterval) || 0) / 60)).padStart(2, '0') + ':' + String((parseInt(notifyInterval) || 0) % 60).padStart(2, '0')}
               onChange={e => {
                 const [h, m] = e.target.value.split(':');
                 setNotifyInterval(String(parseInt(h) * 60 + parseInt(m)));
@@ -889,32 +921,37 @@ function SettingsTab() {
               ✕
             </button>
           </div>
-          <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>Add Website</button>
+          <button className="btn btn-primary" onClick={addNotifyWebsite} style={{ padding: '8px 20px' }}>
+            {editingNotify ? 'Save' : 'Add Website'}
+          </button>
         </div>
 
-        <div style={{ border: '1px solid #e5e5ec', borderRadius: '10px', padding: '16px', backgroundColor: '#fff', minHeight: '150px', marginBottom: '16px' }}>
+        <div className="entry-box">
           {notifyWebsites.length > 0 ? (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <ul className="entry-list">
               {notifyWebsites.map(n => (
-                <li key={n.domain} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', backgroundColor: '#f9f9fc', borderRadius: '8px', border: '1px solid #f0f0f5' }}>
-                  <span style={{ fontSize: '13px', color: '#333' }}>{n.domain} · {n.intervalMins}min</span>
-                  <button className="btn btn-small btn-danger" onClick={() => removeNotifyWebsite(n.domain)}>Remove</button>
-                </li>
+                <SiteRow
+                  key={n.domain}
+                  domain={n.domain}
+                  subtext={`Limit : ${fmtHM(n.intervalMins)}`}
+                  onDelete={() => removeNotifyWebsite(n.domain)}
+                  onEdit={() => startEditNotify(n)}
+                />
               ))}
             </ul>
           ) : (
-            <p style={{ color: '#999', textAlign: 'center', margin: 0, lineHeight: '150px' }}>No per-website notifications yet</p>
+            <p className="entry-empty">No per-website notifications yet</p>
           )}
         </div>
 
-        <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#111', margin: '0 0 8px', textTransform: 'capitalize' }}>Notification message</h3>
+        <h3 style={{ fontSize: '15px', fontWeight: '600', color: '#111', margin: '16px 0 4px' }}>Notification message</h3>
         <p className="card-subtitle" style={{ fontSize: '12px', marginBottom: '12px' }}>You will see this message in notification for websites every time</p>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
           <textarea
             value={notifyMessage}
             onChange={e => setNotifyMessage(e.target.value)}
             placeholder="You have spent a lot of time on this site"
-            rows={3}
+            rows={2}
             style={{ flex: 1, padding: '8px 12px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '13px', color: '#111', fontFamily: 'inherit', resize: 'vertical' }}
           />
           <button className="btn btn-primary" onClick={saveNotificationSettings} style={{ padding: '8px 20px', marginTop: '0' }}>Save</button>
