@@ -90,8 +90,8 @@ function Header(): React.ReactElement {
   return (
     <header className="pop-header">
       <div className="brand">
-        <span className="brand-logo">⏱️</span>
-        <span className="brand-title">Web Activity Time Tracker</span>
+        <span className="brand-logo">⚡</span>
+        <span className="brand-title">Web Pulse</span>
       </div>
       <div className="header-actions">
         <button className="hdr-btn" title="Pomodoro" onClick={() => openDashboard('#pomodoro')}>

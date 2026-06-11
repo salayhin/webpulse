@@ -1219,7 +1219,7 @@ export default function App() {
         <nav className="main-tabs">
           <button className={`main-tab ${tab === 'overview' ? 'main-tab-active' : ''}`} onClick={() => setTab('overview')}>📊 Dashboard</button>
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
-            <span className="yt-icon">▶</span> YouTube
+            <span className="yt-icon">▶</span> YouTube Stats
           </button>
           <button className={`main-tab ${tab === 'pomodoro' ? 'main-tab-active' : ''}`} onClick={() => setTab('pomodoro')}>
             ⏱️ Pomodoro
