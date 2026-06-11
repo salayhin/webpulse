@@ -764,3 +764,6 @@ body {
 .visited-pct { font-variant-numeric: tabular-nums; }
 
 .channel-avatar { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; }
+
+a.visited-link { text-decoration: none; }
+a.visited-link:hover { color: #4f8df5; text-decoration: underline; }

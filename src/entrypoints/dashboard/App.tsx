@@ -321,8 +321,9 @@ function CategoryLegend() {
 function YouTubeTab() {
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
   const [stats, setStats] = useState({ totalWatchedSeconds: 0, uniqueVideos: 0, sessionCount: 0 });
-  const [channels, setChannels] = useState<{ channelName: string; seconds: number; videos: number }[]>([]);
+  const [channels, setChannels] = useState<{ channelName: string; seconds: number; sessions: number }[]>([]);
   const [channelTotal, setChannelTotal] = useState(0);
+  const [channelSort, setChannelSort] = useState<'time' | 'sessions'>('time');
   const [heat, setHeat] = useState<number[][]>(() => Array.from({ length: 7 }, () => Array(24).fill(0)));
   const [dailyCats, setDailyCats] = useState<Array<Record<string, number | string>>>([]);
   const [catKeys, setCatKeys] = useState<string[]>([]);
@@ -338,16 +339,15 @@ function YouTubeTab() {
 
         // Channels in range — watch time, distinct videos, share of total
         const rangeVids = allVids.filter(v => v.date >= start && v.date <= end);
-        const chanMap = new Map<string, { seconds: number; videos: Set<string> }>();
+        const chanMap = new Map<string, { seconds: number; sessions: number }>();
         for (const v of rangeVids) {
           let g = chanMap.get(v.channelName);
-          if (!g) { g = { seconds: 0, videos: new Set() }; chanMap.set(v.channelName, g); }
+          if (!g) { g = { seconds: 0, sessions: 0 }; chanMap.set(v.channelName, g); }
           g.seconds += v.watchedSeconds;
-          g.videos.add(v.videoId);
+          g.sessions += 1;
         }
         const chans = [...chanMap.entries()]
-          .map(([channelName, g]) => ({ channelName, seconds: g.seconds, videos: g.videos.size }))
-          .sort((a, b) => b.seconds - a.seconds);
+          .map(([channelName, g]) => ({ channelName, seconds: g.seconds, sessions: g.sessions }));
         setChannels(chans);
         setChannelTotal(chans.reduce((t, c) => t + c.seconds, 0));
 
@@ -394,7 +394,12 @@ function YouTubeTab() {
     })();
   }, [rangeTab]);
 
-  const maxChanSecs = channels[0]?.seconds ?? 1;
+  const sortedChannels = [...channels].sort((a, b) =>
+    channelSort === 'sessions'
+      ? (b.sessions - a.sessions) || (b.seconds - a.seconds)
+      : (b.seconds - a.seconds)
+  );
+  const maxChanSecs = sortedChannels.reduce((m, c) => Math.max(m, c.seconds), 1);
   const hasSessions = stats.sessionCount > 0;
   const hasDaily = dailyCats.some(row => catKeys.some(k => (row[k] as number) > 0));
   const ytCatColor = (cat: string, i: number) =>
@@ -451,28 +456,44 @@ function YouTubeTab() {
             )}
           </section>
 
-          {/* Channels watched */}
+          {/* Visited channels */}
           <section className="card">
-            <h2 className="card-title">Channels · {rangeTab}</h2>
-            {channels.length === 0 ? <Empty text="No channels for this period." /> : (
+            <h2 className="card-title">Visited Channels</h2>
+            <div className="visited-toolbar">
+              <span className="visited-total">
+                {rangeTab === 'today' ? 'Today' : rangeTab === 'week' ? 'This Week' : 'This Month'} · <strong>{formatDuration(channelTotal)}</strong>
+              </span>
+              <label className="visited-sort">
+                Sort by
+                <select value={channelSort} onChange={e => setChannelSort(e.target.value as 'time' | 'sessions')}>
+                  <option value="time">Usage time</option>
+                  <option value="sessions">Sessions</option>
+                </select>
+              </label>
+            </div>
+            {sortedChannels.length === 0 ? <Empty text="No channels for this period." /> : (
               <ul className="visited-list">
-                {channels.map(({ channelName, seconds, videos }, i) => {
+                {sortedChannels.map(({ channelName, seconds, sessions }) => {
                   const pct = channelTotal > 0 ? (seconds / channelTotal) * 100 : 0;
                   return (
                     <li key={channelName} className="visited-row">
-                      <span className="visited-favicon channel-avatar" style={{ background: COLORS[i % COLORS.length] }}>
-                        {channelName.charAt(0).toUpperCase()}
-                      </span>
                       <div className="visited-body">
                         <div className="visited-head">
-                          <span className="visited-domain">{channelName}</span>
+                          <a
+                            className="visited-domain visited-link"
+                            href={`https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {channelName}
+                          </a>
                           <span className="visited-time">{formatDuration(seconds)}</span>
                         </div>
                         <div className="bar-wrap">
                           <div className="bar" style={{ width: `${(seconds / maxChanSecs) * 100}%`, background: '#4f8df5' }} />
                         </div>
                         <div className="visited-foot">
-                          <span>{videos} {videos === 1 ? 'video' : 'videos'}</span>
+                          <span>{sessions} {sessions === 1 ? 'session' : 'sessions'}</span>
                           <span className="visited-pct">{pct.toFixed(2)} %</span>
                         </div>
                       </div>
