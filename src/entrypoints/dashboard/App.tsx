@@ -582,6 +582,30 @@ function PomodoroTab() {
 
 // ── Settings Tab ────────────────────────────────────────────────────────────
 
+function SiteRow({ domain, subtext, onDelete, onEdit }: {
+  domain: string;
+  subtext?: string;
+  onDelete: () => void;
+  onEdit?: () => void;
+}) {
+  return (
+    <li className="entry-row">
+      <div className="entry-head">
+        <button className="icon-btn icon-delete" title="Remove" onClick={onDelete}>✕</button>
+        {onEdit && <button className="icon-btn" title="Edit" onClick={onEdit}>✏️</button>}
+        <img
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=16`}
+          width={16} height={16} alt="" className="favicon"
+        />
+        <strong className="entry-domain">{domain}</strong>
+      </div>
+      {subtext && <div className="entry-sub">{subtext}</div>}
+    </li>
+  );
+}
+
+const fmtHM = (mins: number) => `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`;
+
 function SettingsTab() {
   const [restrictions, setRestrictions] = useState<Array<{ domain: string; dailyLimitSeconds: number }>>([]);
   const [ignored, setIgnored] = useState<string[]>([]);
