@@ -37,187 +37,73 @@ export interface AmbientOption { id: string; label: string; }
 
 export const AMBIENT_OPTIONS: AmbientOption[] = [
   { id: 'none', label: 'None' },
-  { id: 'wave', label: 'Ocean waves' },
-  { id: 'rain', label: 'Rain & thunder' },
-  { id: 'brown', label: 'Brown noise' },
-  { id: 'tick', label: 'Clock tick-tock' },
+  { id: 'rain', label: 'Rain' },
+  { id: 'clock', label: 'Clock tick-tock' },
 ];
 
 export const DEFAULT_AMBIENT = 'none';
 
+// Bundled ambient loops (src/public/audio/, web-accessible via runtime.getURL).
+// `gain` sets the relative playback level; `crop` trims the loop edges so MP3
+// encoder padding doesn't leave an audible seam (0 for the gapless WAV clock).
+const AMBIENT_FILES: Record<string, { url: string; gain: number; crop: number }> = {
+  rain: { url: 'audio/rain.mp3', gain: 0.45, crop: 0.04 },
+  clock: { url: 'audio/clock.wav', gain: 0.8, crop: 0 },
+};
+
 export interface AmbientHandle { stop(): void; }
 
-// Helper: fill a buffer with brown noise (integrated white noise — deep rumble).
-function fillBrownNoise(data: Float32Array, amp = 3.5): void {
-  let last = 0;
-  for (let i = 0; i < data.length; i++) {
-    const w = Math.random() * 2 - 1;
-    last = (last + 0.02 * w) / 1.02;
-    data[i] = last * amp;
-  }
-}
-
 /**
- * Start a continuously-looping ambient sound. Returns a handle whose stop()
- * fades out and releases the audio context, or null for 'none'/unavailable.
+ * Start a continuously-looping ambient sound from its bundled audio file.
+ * Returns a handle immediately (loading is async); its stop() fades out and
+ * releases the audio context. Returns null for 'none'/unknown/unavailable.
+ *
+ * We decode the file to an AudioBuffer and loop it via an AudioBufferSourceNode
+ * so the loop is sample-accurate (an <audio loop> tag gaps on MP3 padding).
  */
 export function startAmbient(id: string): AmbientHandle | null {
   if (!id || id === 'none') return null;
+  const cfg = AMBIENT_FILES[id];
+  if (!cfg) return null;
   const Ctx = window.AudioContext || (window as any).webkitAudioContext;
   if (!Ctx) return null;
   const ctx: AudioContext = new Ctx();
-  // Some browsers (and the offscreen doc) start the context suspended; resume
-  // proactively so the very first sample is audible.
+  // Some browsers start the context suspended; resume so the first sample plays.
   if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
 
   const master = ctx.createGain();
+  master.gain.value = cfg.gain;
   master.connect(ctx.destination);
-  // Per-preset master level. Tick is short transients so it needs more headroom.
-  const targetGain = id === 'tick' ? 0.6 : id === 'rain' ? 0.18 : 0.14;
-  // Very short fade-in (10 ms) — long fades made the first tick inaudible.
-  master.gain.setValueAtTime(0.0001, ctx.currentTime);
-  master.gain.exponentialRampToValueAtTime(targetGain, ctx.currentTime + 0.05);
 
-  let tickTimer: ReturnType<typeof setInterval> | undefined;
-  let thunderTimer: ReturnType<typeof setTimeout> | undefined;
-  const stoppables: AudioScheduledSourceNode[] = [];
+  let src: AudioBufferSourceNode | null = null;
+  let stopped = false;
 
-  if (id === 'brown') {
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-    fillBrownNoise(buffer.getChannelData(0));
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 500;
-    src.connect(lp);
-    lp.connect(master);
-    src.start();
-    stoppables.push(src);
-  } else if (id === 'wave') {
-    // Ocean swells: brown noise through a slow LFO-modulated low-pass to mimic
-    // the rolling rise + crash of waves on a beach.
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
-    fillBrownNoise(buffer.getChannelData(0), 4);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 900;
-    // Swell envelope — LFO modulates a gain node so amplitude rises + falls.
-    const swell = ctx.createGain();
-    swell.gain.value = 0.55;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.13; // ~7.7s period — one full wave cycle
-    const lfoAmt = ctx.createGain();
-    lfoAmt.gain.value = 0.45;
-    lfo.connect(lfoAmt);
-    lfoAmt.connect(swell.gain);
-    lfo.start();
-    src.connect(lp);
-    lp.connect(swell);
-    swell.connect(master);
-    src.start();
-    stoppables.push(src, lfo);
-  } else if (id === 'rain') {
-    // Steady rain: white noise band-passed for the high "shhhh" of drops.
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    const hp = ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 800;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 6000;
-    src.connect(hp);
-    hp.connect(lp);
-    lp.connect(master);
-    src.start();
-    stoppables.push(src);
-
-    // Thunder: low-pass brown noise burst every 12–35s with a deep rumble decay.
-    const scheduleThunder = () => {
-      const delay = 12000 + Math.random() * 23000;
-      thunderTimer = setTimeout(() => {
-        const t = ctx.currentTime;
-        const tbuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 3.5), ctx.sampleRate);
-        fillBrownNoise(tbuf.getChannelData(0), 5);
-        const tsrc = ctx.createBufferSource();
-        tsrc.buffer = tbuf;
-        const tlp = ctx.createBiquadFilter();
-        tlp.type = 'lowpass';
-        tlp.frequency.value = 220;
-        const tg = ctx.createGain();
-        // Sharp initial crack, long rumbling tail
-        tg.gain.setValueAtTime(0.0001, t);
-        tg.gain.exponentialRampToValueAtTime(2.5, t + 0.12);
-        tg.gain.exponentialRampToValueAtTime(0.6, t + 0.6);
-        tg.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
-        tsrc.connect(tlp);
-        tlp.connect(tg);
-        tg.connect(master);
-        tsrc.start(t);
-        tsrc.stop(t + 3.3);
-        scheduleThunder();
-      }, delay);
-    };
-    scheduleThunder();
-  } else if (id === 'tick') {
-    // Alternating tick / tock — short noise transient + a pitched triangle pop,
-    // twice a second, like an analog watch. The noise burst gives it the
-    // characteristic "tk" attack that pure square waves miss.
-    let tock = false;
-    const noiseBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.012), ctx.sampleRate);
-    const nd = noiseBuf.getChannelData(0);
-    for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
-
-    const click = () => {
-      const t = ctx.currentTime;
-      // 1) Noise transient (the "tk")
-      const nsrc = ctx.createBufferSource();
-      nsrc.buffer = noiseBuf;
-      const nhp = ctx.createBiquadFilter();
-      nhp.type = 'highpass';
-      nhp.frequency.value = 2000;
-      const ng = ctx.createGain();
-      ng.gain.setValueAtTime(0.9, t);
-      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.012);
-      nsrc.connect(nhp);
-      nhp.connect(ng);
-      ng.connect(master);
-      nsrc.start(t);
-      // 2) Short pitched body — tick high, tock low
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = tock ? 950 : 1450;
-      tock = !tock;
-      osc.connect(g);
-      g.connect(master);
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(0.55, t + 0.002);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
-      osc.start(t);
-      osc.stop(t + 0.06);
-    };
-    // Schedule the first tick slightly after the fade-in completes so it's
-    // audible at full level.
-    setTimeout(click, 60);
-    tickTimer = setInterval(click, 500);
-  }
+  void fetch(chrome.runtime.getURL(cfg.url))
+    .then(r => r.arrayBuffer())
+    .then(buf => ctx.decodeAudioData(buf))
+    .then(audio => {
+      if (stopped) return;
+      src = ctx.createBufferSource();
+      src.buffer = audio;
+      src.loop = true;
+      // Crop the loop edges so MP3 encoder padding doesn't create a seam.
+      if (cfg.crop > 0) {
+        src.loopStart = cfg.crop;
+        src.loopEnd = Math.max(cfg.crop + 0.05, audio.duration - cfg.crop);
+      }
+      src.connect(master);
+      // Short fade-in to avoid a click on start.
+      master.gain.setValueAtTime(0.0001, ctx.currentTime);
+      master.gain.exponentialRampToValueAtTime(cfg.gain, ctx.currentTime + 0.1);
+      src.start();
+    })
+    .catch(() => { /* file missing or decode failed — stay silent */ });
 
   return {
     stop() {
+      stopped = true;
       try { master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2); } catch { /* ctx may be closing */ }
-      if (tickTimer) clearInterval(tickTimer);
-      if (thunderTimer) clearTimeout(thunderTimer);
-      for (const s of stoppables) { try { s.stop(ctx.currentTime + 0.25); } catch { /* already stopped */ } }
+      if (src) { try { src.stop(ctx.currentTime + 0.25); } catch { /* already stopped */ } }
       setTimeout(() => ctx.close().catch(() => {}), 400);
     },
   };

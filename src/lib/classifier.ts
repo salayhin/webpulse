@@ -5,9 +5,10 @@ import type { Category } from '../db';
 // per domain on day one, and is more reliable than AI for ambiguous cases like
 // `mail.google.com` (productivity, despite being "google").
 //
-// Matching: exact hostname or `*.endsWith('.' + key)` for subdomains. Apex
-// entries (e.g. 'google.com') do NOT match subdomains; list specific subdomains
-// when their category differs from the apex (gmail.com → productivity).
+// Matching: exact hostname first, then longest-suffix subdomain match — apex
+// entries cover their subdomains ('gist.github.com' → productivity), and a more
+// specific subdomain entry wins over its apex when categories differ
+// ('mail.google.com' → productivity while 'google.com' stays unlisted).
 
 const STATIC_MAP: Record<string, Category> = {
   // ── Productivity / dev tools ─────────────────────────────────────────────
@@ -46,6 +47,10 @@ const STATIC_MAP: Record<string, Category> = {
   'console.cloud.google.com': 'productivity',
   'portal.azure.com': 'productivity',
   'huggingface.co': 'productivity',
+  'outlook.com': 'productivity',
+  'outlook.live.com': 'productivity',
+  'zoom.us': 'productivity',
+  'teams.microsoft.com': 'productivity',
 
   // ── Social ───────────────────────────────────────────────────────────────
   'twitter.com': 'social',
@@ -58,18 +63,18 @@ const STATIC_MAP: Record<string, Category> = {
   'linkedin.com': 'social',
   'discord.com': 'social',
   'whatsapp.com': 'social',
-  'web.whatsapp.com': 'social',
   'messenger.com': 'social',
   'bsky.app': 'social',
   'mastodon.social': 'social',
+  'telegram.org': 'social',
+  'pinterest.com': 'social',
+  'snapchat.com': 'social',
 
   // ── Entertainment ────────────────────────────────────────────────────────
   'youtube.com': 'entertainment',
-  'm.youtube.com': 'entertainment',
   'netflix.com': 'entertainment',
   'twitch.tv': 'entertainment',
   'spotify.com': 'entertainment',
-  'open.spotify.com': 'entertainment',
   'hulu.com': 'entertainment',
   'primevideo.com': 'entertainment',
   'disneyplus.com': 'entertainment',
@@ -79,7 +84,6 @@ const STATIC_MAP: Record<string, Category> = {
   'imdb.com': 'entertainment',
   'crunchyroll.com': 'entertainment',
   'steampowered.com': 'entertainment',
-  'store.steampowered.com': 'entertainment',
 
   // ── News ─────────────────────────────────────────────────────────────────
   'news.ycombinator.com': 'news',
@@ -99,6 +103,9 @@ const STATIC_MAP: Record<string, Category> = {
   'arstechnica.com': 'news',
   'wired.com': 'news',
   'engadget.com': 'news',
+  'medium.com': 'news',
+  'dev.to': 'news',
+  'substack.com': 'news',
 
   // ── Education ────────────────────────────────────────────────────────────
   'coursera.org': 'education',
@@ -111,16 +118,21 @@ const STATIC_MAP: Record<string, Category> = {
   'frontendmasters.com': 'education',
   'egghead.io': 'education',
   'wikipedia.org': 'education',
-  'en.wikipedia.org': 'education',
+  'leetcode.com': 'education',
+  'freecodecamp.org': 'education',
 };
 
 export function staticCategorize(rawDomain: string): Category | null {
   const domain = rawDomain.toLowerCase().replace(/^www\./, '');
   const direct = STATIC_MAP[domain];
   if (direct) return direct;
-  // Subdomain fallback: longest suffix match wins
+  // Subdomain fallback: longest suffix match wins, so a specific subdomain
+  // entry beats its apex regardless of insertion order
+  let best: string | null = null;
   for (const key of Object.keys(STATIC_MAP)) {
-    if (domain.endsWith('.' + key)) return STATIC_MAP[key];
+    if (domain.endsWith('.' + key) && (best === null || key.length > best.length)) {
+      best = key;
+    }
   }
-  return null;
+  return best !== null ? STATIC_MAP[best] : null;
 }

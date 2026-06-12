@@ -14,6 +14,22 @@ interface ActiveSession {
 
 let activeSession: ActiveSession | null = null;
 
+// Shape the dashboard's Pomodoro tab persists in chrome.storage.local under
+// 'pomodoro' (see PomodoroState in dashboard/App.tsx). All fields optional —
+// storage may hold older/partial blobs.
+interface StoredPomodoro {
+  mode?: 'idle' | 'work' | 'rest';
+  startedAt?: number | null;
+  workMins?: number;
+  restMins?: number;
+  repetitions?: number;
+  currentRep?: number;
+  workSound?: string;
+  restSound?: string;
+  doneSound?: string;
+  ambientSound?: string;
+}
+
 // ── AI classification (via offscreen document) ─────────────────────────
 // LanguageModel is not guaranteed in MV3 service workers; offscreen
 // documents are full extension pages where the Prompt API works.
@@ -110,8 +126,10 @@ async function checkWebsiteNotifications(domain: string): Promise<void> {
       .reduce((s, e) => s + e.duration, 0);
 
     const stored = await chrome.storage.local.get('notifyState');
-    const notifyState: Record<string, { date: string; lastMultiple: number }> =
-      stored.notifyState ?? {};
+    const notifyState = (stored.notifyState ?? {}) as Record<
+      string,
+      { date: string; lastMultiple: number }
+    >;
 
     const due = dueNotifyMultiple(cfg.intervalMins, cumulative, notifyState[domain], today);
     if (due === null) return;
@@ -308,7 +326,7 @@ export default defineBackground(() => {
     } else if (alarm.name === 'pomodoro-work') {
       // Work period finished → start the rest period
       const state = await chrome.storage.local.get('pomodoro');
-      const pom = state.pomodoro || {};
+      const pom = (state.pomodoro ?? {}) as StoredPomodoro;
       const restMins = pom.restMins ?? 5;
       const rep = pom.currentRep ?? 1;
       const reps = pom.repetitions ?? 1;
@@ -326,7 +344,7 @@ export default defineBackground(() => {
     } else if (alarm.name === 'pomodoro-rest') {
       // Rest period finished → next pomodoro, or finish the whole run
       const state = await chrome.storage.local.get('pomodoro');
-      const pom = state.pomodoro || {};
+      const pom = (state.pomodoro ?? {}) as StoredPomodoro;
       const reps = pom.repetitions ?? 1;
       const rep = pom.currentRep ?? 1;
       if (rep < reps) {
@@ -385,22 +403,48 @@ export default defineBackground(() => {
     if (message.type === 'YOUTUBE_SESSION') {
       console.log('[WebPulse] YOUTUBE_SESSION received:', message.title, `${message.watchedSeconds}s`);
       (async () => {
-        const id = await db.videoSessions.add({
-          videoId: message.videoId,
-          title: message.title,
-          channelName: message.channelName,
-          category: message.category ?? 'Unknown',
-          watchedSeconds: message.watchedSeconds,
-          date: localDate(message.startedAt),
-          startedAt: message.startedAt,
+        // The content script checkpoints the same watch repeatedly as time
+        // accrues, keyed on (videoId, startedAt). Upsert that row rather than
+        // appending, so one continuous watch is one session — not a pile of rows.
+        // The find-or-add runs in a transaction so concurrent checkpoints (e.g.
+        // a retried send racing the next one) can't double-insert.
+        const newId = await db.transaction('rw', db.videoSessions, async () => {
+          const existing = await db.videoSessions
+            .where('startedAt').equals(message.startedAt)
+            .filter(r => r.videoId === message.videoId)
+            .first();
+
+          if (existing) {
+            const patch: Partial<typeof existing> = { watchedSeconds: message.watchedSeconds };
+            // Late-resolving metadata can improve across checkpoints.
+            if (message.title && message.title !== 'Unknown') patch.title = message.title;
+            if (message.channelName && message.channelName !== 'Unknown') patch.channelName = message.channelName;
+            if (message.category && message.category !== 'Unknown' && existing.category === 'Unknown') {
+              patch.category = message.category;
+            }
+            await db.videoSessions.update(existing.id!, patch);
+            return null; // not a new row → no AI classify needed
+          }
+
+          return db.videoSessions.add({
+            videoId: message.videoId,
+            title: message.title,
+            channelName: message.channelName,
+            category: message.category ?? 'Unknown',
+            watchedSeconds: message.watchedSeconds,
+            date: localDate(message.startedAt),
+            startedAt: message.startedAt,
+          });
         });
-        // Fill in category via on-device AI when YouTube didn't provide one
-        if (!message.category || message.category === 'Unknown') {
+
+        // Fill in category via on-device AI when YouTube didn't provide one —
+        // only on first insert, and outside the transaction (it's slow/async).
+        if (newId !== null && (!message.category || message.category === 'Unknown')) {
           const cat = await aiClassify({
             kind: 'video', title: message.title, channelName: message.channelName,
           });
           console.log('[WebPulse] AI video category:', message.title, '→', cat);
-          if (cat) await db.videoSessions.update(id, { category: cat });
+          if (cat) await db.videoSessions.update(newId, { category: cat });
         }
       })().catch((err: unknown) => console.error('[WebPulse] Failed to save video session:', err));
       sendResponse({ ok: true });

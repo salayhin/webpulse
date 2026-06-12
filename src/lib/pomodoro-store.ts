@@ -14,7 +14,7 @@ export interface PomodoroState {
 // Stored in chrome.storage.local under 'pomodoro'
 export async function getPomodoroState(): Promise<PomodoroState> {
   const data = await chrome.storage.local.get('pomodoro');
-  return data.pomodoro || {
+  return (data.pomodoro as PomodoroState | undefined) || {
     mode: 'idle',
     startedAt: null,
     workMins: 25,

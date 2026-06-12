@@ -39,6 +39,9 @@ body {
 }
 
 .logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.5px;
@@ -52,6 +55,7 @@ body {
   font-family: inherit;
   transition: opacity 0.15s;
 }
+.logo-mark { display: block; width: 26px; height: 26px; flex-shrink: 0; }
 
 .logo:hover { opacity: 0.7; }
 
@@ -691,6 +695,80 @@ body {
   width: 100%;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.toggle-label {
+  font-size: 14px;
+  color: #374151;
+}
+.toggle-check {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4f46e5;
+}
+
+/* ── About nav button — pinned to sidebar bottom ────────────────────────── */
+.main-tab-about {
+  margin-top: auto;
+  border-top: 1px solid #ececf2;
+  padding-top: 14px;
+}
+
+/* ── About tab page ──────────────────────────────────────────────────────── */
+.about-page { display: flex; flex-direction: column; gap: 20px; }
+
+.about-card { display: flex; flex-direction: column; gap: 20px; }
+
+/* app header row */
+.about-app-header { display: flex; align-items: baseline; gap: 10px; }
+.about-app-name   { font-size: 22px; font-weight: 800; color: #111; letter-spacing: -.4px; }
+.about-app-version {
+  font-size: 12px; font-weight: 600;
+  color: #fff; background: #4f46e5;
+  padding: 2px 8px; border-radius: 999px;
+}
+
+.about-desc {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.about-divider { height: 1px; background: #f0f0f5; margin: 0 -4px; }
+
+/* developer row */
+.about-dev-row { display: flex; align-items: flex-start; gap: 16px; }
+
+.dev-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #fff; font-size: 15px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; letter-spacing: .5px;
+}
+.dev-info  { display: flex; flex-direction: column; gap: 3px; }
+.dev-name  { font-size: 15px; font-weight: 700; color: #111; }
+.dev-email { font-size: 13px; color: #4f46e5; text-decoration: none; }
+.dev-email:hover { text-decoration: underline; }
+.dev-web   { font-size: 12px; color: #9ca3af; text-decoration: none; margin-top: 1px; }
+.dev-web:hover { color: #6b7280; text-decoration: underline; }
+
+/* footer row */
+.about-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.about-license  { font-size: 12px; color: #9ca3af; }
+.about-gh-link  { font-size: 12px; color: #9ca3af; text-decoration: none; }
+.about-gh-link:hover { color: #374151; text-decoration: underline; }
+
 .btn-large {
   padding: 12px 24px;
   font-size: 14px;
@@ -772,15 +850,40 @@ a.visited-link:hover { color: #4f8df5; text-decoration: underline; }
 .pom-info { background: #eef2ff; border-radius: 10px; padding: 16px 18px; margin-bottom: 24px; font-size: 13px; color: #444; line-height: 1.5; }
 .pom-info p { margin: 0 0 8px; }
 .pom-info p:last-child { margin-bottom: 0; }
-.pom-field { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
-.pom-field-label { font-size: 15px; font-weight: 700; color: #111; min-width: 180px; }
 .pom-time-input, .pom-reps-input {
   padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px;
   font-size: 14px; color: #111; font-family: inherit; background: #fff;
 }
-.pom-reps-input { width: 80px; }
-.sound-row { display: flex; align-items: center; gap: 12px; margin: 0 0 20px 0; }
-.sound-label { font-size: 13px; color: #555; min-width: 180px; }
+/* Native time controls need room for HH:MM plus the spinner/clock affordance —
+   too narrow and the digits clip. */
+.pom-time-input { width: 120px; }
+.pom-reps-input { width: 64px; text-align: center; }
+
+/* ── Pomodoro settings table ──────────────────────────────────────────── */
+.pom-settings-head { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.pom-repeat { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #555; }
+.pom-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+.pom-table th {
+  text-align: left; font-size: 12px; font-weight: 600; color: #888;
+  padding: 0 0 10px; letter-spacing: 0.01em;
+}
+.pom-table td {
+  padding: 14px 12px 14px 0; border-top: 1px solid #eee;
+  font-size: 15px; color: #111; vertical-align: middle;
+}
+.pom-table th:first-child, .pom-table td:first-child { padding-left: 0; }
+.pom-table th:nth-child(2), .pom-table td:nth-child(2) { width: 140px; }
+.pom-table th:nth-child(3), .pom-table td:nth-child(3) { width: 48%; }
+.pom-phase { font-weight: 600; white-space: nowrap; }
+.pom-phase-icon { margin-right: 8px; }
+.pom-after { color: #999; }
+.pom-chime { display: flex; align-items: center; gap: 8px; }
+.pom-chime .sound-select { flex: 1; min-width: 0; }
+.pom-listen { background: none; border: none; cursor: pointer; color: #888; font-size: 14px; padding: 6px 8px; border-radius: 6px; line-height: 1; }
+.pom-listen:hover { color: #4f46e5; background: #f3f4f6; }
+
+.sound-row { display: flex; align-items: center; gap: 12px; margin: 0 0 20px 0; padding-top: 16px; border-top: 1px solid #eee; }
+.sound-label { font-size: 14px; color: #555; flex: 1; }
 .sound-select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; color: #111; background: #fff; cursor: pointer; font-family: inherit; min-width: 130px; }
 .sound-listen { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; color: #888; font-size: 13px; padding: 0; font-family: inherit; }
 .sound-listen:hover { color: #4f46e5; }

@@ -10,21 +10,32 @@ export default defineContentScript({
   runAt: 'document_idle',
 
   main() {
-    let currentMeta: YtMeta | null = null;
-    let sessionStartedAt: number | null = null;
-    let accumulatedMs = 0;
-    let videoEl: HTMLVideoElement | null = null;
+    // Why polling instead of play/pause/visibility events: edge-triggered
+    // tracking is fragile — a single missed event (YouTube swapping the <video>
+    // element during the opening ad, or the video already playing on tab-return
+    // so no `play` fires) silently stops tracking forever. This loop instead
+    // samples the player once a second and accumulates real time whenever
+    // `video.currentTime` advanced. It is self-healing: if anything goes wrong,
+    // the next tick re-syncs. It also counts background-tab playback and keeps a
+    // single session alive across tab switches.
+    const TICK_MS = 1000;
+    const CHECKPOINT_SECS = 10;   // persist progress to the background this often
+    const MIN_SESSION_SECS = 3;   // ignore trivially short watches
 
-    // Head meta tags (genre) describe only the video in the initial HTML —
-    // YouTube does NOT update them on SPA navigation. Content scripts also
-    // can't read page JS (ytInitialPlayerResponse), so live DOM is the source
-    // of truth; the background fills missing categories via on-device AI.
     const initialVideoId = location.pathname === '/watch'
       ? new URLSearchParams(location.search).get('v')
       : null;
 
     const H1_TITLE = 'ytd-watch-metadata h1 yt-formatted-string';
-    const CHANNEL = 'ytd-video-owner-renderer ytd-channel-name yt-formatted-string#text';
+    // The owner/channel block renders late and YouTube reshuffles its DOM often,
+    // so try several selectors in priority order rather than relying on one.
+    const CHANNEL_SELECTORS = [
+      '#owner ytd-channel-name #text a',
+      '#owner ytd-channel-name #text',
+      'ytd-video-owner-renderer ytd-channel-name a',
+      'ytd-channel-name#channel-name a',
+      '#owner #channel-name a',
+    ];
 
     function domText(selector: string): string | undefined {
       return (document.querySelector(selector) as HTMLElement | null)?.textContent?.trim() || undefined;
@@ -33,22 +44,31 @@ export default defineContentScript({
       return (document.querySelector(`meta[${attr}="${value}"]`) as HTMLMetaElement | null)?.content || undefined;
     }
 
-    // ── Metadata ───────────────────────────────────────────────────────────
+    /** Channel name from the live DOM, falling back to schema.org author
+     * microdata (present in the initial HTML, but not updated on SPA nav). */
+    function readChannel(): string | undefined {
+      for (const sel of CHANNEL_SELECTORS) {
+        const t = domText(sel);
+        if (t) return t;
+      }
+      const author = document.querySelector('[itemprop="author"] [itemprop="name"]');
+      return author?.getAttribute('content')?.trim() || undefined;
+    }
 
-    function readMeta(): YtMeta | null {
+    function currentVideoId(): string | null {
       if (location.pathname !== '/watch') return null;
-      const videoId = new URLSearchParams(location.search).get('v');
-      if (!videoId) return null;
+      return new URLSearchParams(location.search).get('v');
+    }
 
+    function readMeta(videoId: string): YtMeta {
       const docTitle = document.title
         .replace(/^\(\d+\)\s*/, '')
         .replace(/ - YouTube$/, '')
         .trim();
-
       return {
         videoId,
         title: domText(H1_TITLE) ?? (docTitle || 'Unknown'),
-        channelName: domText(CHANNEL) ?? domText('#owner #channel-name a') ?? 'Unknown',
+        channelName: readChannel() ?? 'Unknown',
         // genre meta is only trustworthy for the full-page-load video
         category: videoId === initialVideoId
           ? (metaContent('itemprop', 'genre') ?? 'Unknown')
@@ -56,142 +76,194 @@ export default defineContentScript({
       };
     }
 
-    // The watch page renders its metadata (h1, channel) shortly after
-    // navigation. Re-read until the h1 is present, updating in place.
-    function refineMeta(videoId: string, attempts = 0) {
-      if (attempts >= 8) return;
-      setTimeout(() => {
-        if (currentMeta?.videoId !== videoId) return;
-        if (!domText(H1_TITLE)) { refineMeta(videoId, attempts + 1); return; }
-        const fresh = readMeta();
-        if (!fresh || fresh.videoId !== videoId) return;
-        currentMeta.title = fresh.title;
-        currentMeta.channelName = fresh.channelName;
-        if (currentMeta.category === 'Unknown') currentMeta.category = fresh.category;
-      }, 600);
+    // ── Session state ────────────────────────────────────────────────────────
+
+    interface Session {
+      videoId: string;
+      startedAt: number;   // wall-clock ms when this watch began — half of the upsert key
+      meta: YtMeta;
+      watchedMs: number;   // accumulated real playback time
+      sentSecs: number;    // last value reported to the background (avoids redundant sends)
     }
 
-    // ── Timing ─────────────────────────────────────────────────────────────
+    let session: Session | null = null;
+    let lastTickAt = Date.now();
+    let lastCurrentTime: number | null = null;
 
-    function onPlay() {
-      if (sessionStartedAt !== null) return;
-      sessionStartedAt = Date.now();
-    }
-
-    function onPause() {
-      if (sessionStartedAt === null) return;
-      accumulatedMs += Date.now() - sessionStartedAt;
-      sessionStartedAt = null;
-    }
-
-    function flush() {
-      if (sessionStartedAt !== null) {
-        accumulatedMs += Date.now() - sessionStartedAt;
-        sessionStartedAt = null;
-      }
-      if (!currentMeta) return;
-
-      const watchedSeconds = Math.round(accumulatedMs / 1000);
-      const meta = currentMeta;
-      currentMeta = null;
-      accumulatedMs = 0;
-
-      if (watchedSeconds < 3) return;
-
-      sendSession({
+    function sendSession(s: Session, retried = false) {
+      const watchedSeconds = Math.round(s.watchedMs / 1000);
+      const payload = {
         type: 'YOUTUBE_SESSION',
-        ...meta,
-        startedAt: Date.now() - watchedSeconds * 1000,
+        videoId: s.videoId,
+        title: s.meta.title,
+        channelName: s.meta.channelName,
+        category: s.meta.category,
+        startedAt: s.startedAt,
         watchedSeconds,
-      });
-    }
-
-    function sendSession(payload: Record<string, unknown>, retried = false) {
+      };
       try {
         chrome.runtime.sendMessage(payload)
-          .then(() => console.log('[WebPulse] session sent:', payload.title, `${payload.watchedSeconds}s`))
-          .catch((err) => {
-            if (!retried) {
-              // Service worker may have been asleep — retry once
-              setTimeout(() => sendSession(payload, true), 1000);
-            } else {
-              console.warn('[WebPulse] session send failed:', err);
-            }
-          });
-      } catch { /* stale context after extension reload */ }
+          .then(() => console.log('[WebPulse] session checkpoint:', s.meta.title, `${watchedSeconds}s`))
+          .catch(() => { if (!retried) setTimeout(() => sendSession(s, true), 1000); });
+      } catch { /* extension context invalidated after reload */ }
     }
 
-    // ── Video element ──────────────────────────────────────────────────────
-
-    function detachVideo() {
-      if (!videoEl) return;
-      videoEl.removeEventListener('play', onPlay);
-      videoEl.removeEventListener('pause', onPause);
-      videoEl.removeEventListener('ended', onPause);
-      videoEl = null;
+    // Persist the session to the background. The (videoId, startedAt) pair is a
+    // stable key, so repeated checkpoints upsert the same row rather than
+    // creating duplicates.
+    function checkpoint(force: boolean) {
+      if (!session) return;
+      const secs = Math.round(session.watchedMs / 1000);
+      if (secs < MIN_SESSION_SECS || secs === session.sentSecs) return;
+      if (!force && secs - session.sentSecs < CHECKPOINT_SECS) return;
+      session.sentSecs = secs;
+      sendSession(session);
     }
 
-    function attachVideo(v: HTMLVideoElement) {
-      videoEl = v;
-      v.addEventListener('play', onPlay);
-      v.addEventListener('pause', onPause);
-      v.addEventListener('ended', onPause);
-      if (!v.paused) onPlay();
+    function endSession() {
+      if (!session) return;
+      checkpoint(true);
+      session = null;
+      lastCurrentTime = null;
     }
 
-    function findAndAttach(attempts = 0) {
+    // Channel/title render late — keep filling them in until resolved.
+    function refreshMeta() {
+      if (!session) return;
+      if (session.meta.channelName !== 'Unknown' && session.meta.title !== 'Unknown') return;
+      const fresh = readMeta(session.videoId);
+      if (fresh.title !== 'Unknown') session.meta.title = fresh.title;
+      if (fresh.channelName !== 'Unknown') session.meta.channelName = fresh.channelName;
+      if (session.meta.category === 'Unknown' && fresh.category !== 'Unknown') session.meta.category = fresh.category;
+    }
+
+    function tick() {
+      const now = Date.now();
+      const realElapsed = now - lastTickAt;
+      lastTickAt = now;
+
+      const vid = currentVideoId();
+      if (!vid) { endSession(); return; }
+
+      // New video (direct land or SPA navigation) → finalize the old, start fresh.
+      if (!session || session.videoId !== vid) {
+        endSession();
+        session = { videoId: vid, startedAt: now, meta: readMeta(vid), watchedMs: 0, sentSecs: 0 };
+        lastCurrentTime = null;
+        console.log('[WebPulse] tracking video:', vid, session.meta.title);
+      }
+
+      refreshMeta();
+
       const v = document.querySelector('video') as HTMLVideoElement | null;
-      if (v) { attachVideo(v); return; }
-      if (attempts < 10) setTimeout(() => findAndAttach(attempts + 1), 400);
-    }
-
-    // ── Page setup ─────────────────────────────────────────────────────────
-
-    function setupWatchPage() {
-      flush();
-      detachVideo();
-
-      const meta = readMeta();
-      if (!meta) return;
-
-      currentMeta = meta;
-      accumulatedMs = 0;
-      sessionStartedAt = null;
-      console.log('[WebPulse] tracking video:', meta.videoId, meta.title);
-
-      refineMeta(meta.videoId);
-      findAndAttach();
-    }
-
-    // ── Event listeners ────────────────────────────────────────────────────
-
-    document.addEventListener('yt-navigate-finish', () => {
-      if (location.pathname === '/watch') {
-        setupWatchPage();
+      if (v && Number.isFinite(v.currentTime)) {
+        const ct = v.currentTime;
+        if (lastCurrentTime !== null && !v.paused && !v.ended) {
+          const advanced = ct - lastCurrentTime;
+          if (advanced > 0) {
+            // Count real time spent watching. Dividing by playbackRate converts
+            // content-seconds → real-seconds (correct at any speed); clamping to
+            // realElapsed keeps forward seeks and element swaps from inflating it.
+            const realPlayMs = (advanced * 1000) / (v.playbackRate || 1);
+            session.watchedMs += Math.min(realElapsed, realPlayMs);
+          }
+        }
+        lastCurrentTime = ct;
       } else {
-        flush();
-        detachVideo();
+        lastCurrentTime = null;
+      }
+
+      checkpoint(false);
+    }
+
+    setInterval(tick, TICK_MS);
+    tick();
+
+    // ── Hide Shorts ──────────────────────────────────────────────────────────
+    const SHORTS_STYLE_ID = 'webpulse-hide-shorts';
+
+    const SHORTS_CSS = `
+      /* Shorts shelf on homepage and subscription feed */
+      ytd-rich-shelf-renderer[is-shorts],
+      ytd-reel-shelf-renderer,
+      ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+
+      /* Shorts in search results */
+      ytd-reel-item-renderer,
+      ytd-shorts-lockup-view-model,
+      ytd-shorts-lockup-view-model-v2,
+
+      /* Shorts tab on channel pages */
+      tp-yt-paper-tab:has([href*="/shorts"]),
+      yt-tab-shape[tab-title="Shorts"],
+
+      /* Shorts entry in left sidebar nav (expanded + mini + chip bar) */
+      ytd-guide-entry-renderer:has(a[href="/shorts"]),
+      ytd-mini-guide-entry-renderer:has(a[href="/shorts"]),
+      yt-chip-cloud-chip-renderer:has([href*="sp=EgIQAQ"]),
+
+      /* Shorts in the new sidebar design */
+      ytd-guide-section-renderer:has(a[href="/shorts"]),
+      a[href="/shorts"],
+      a[href^="/shorts/"] {
+        display: none !important;
+      }
+    `;
+
+    function redirectIfShorts() {
+      if (location.pathname === '/shorts' || location.pathname.startsWith('/shorts/')) {
+        location.replace('https://www.youtube.com/');
+      }
+    }
+
+    function applyShorts(hide: boolean) {
+      // Handle CSS hiding
+      let el = document.getElementById(SHORTS_STYLE_ID);
+      if (hide) {
+        if (!el) {
+          el = document.createElement('style');
+          el.id = SHORTS_STYLE_ID;
+          document.head.appendChild(el);
+        }
+        el.textContent = SHORTS_CSS;
+        // Redirect if already on a Shorts URL
+        redirectIfShorts();
+      } else {
+        el?.remove();
+      }
+    }
+
+    // Redirect on SPA navigation to /shorts
+    document.addEventListener('yt-navigate-finish', () => {
+      chrome.storage.local.get('hideYouTubeShorts', (r) => {
+        if ((r.hideYouTubeShorts as boolean)) redirectIfShorts();
+      });
+    });
+
+    // Apply on load, then keep in sync with setting changes
+    chrome.storage.local.get('hideYouTubeShorts', (r) => {
+      applyShorts((r.hideYouTubeShorts as boolean) ?? false);
+    });
+    chrome.storage.onChanged.addListener((changes) => {
+      if ('hideYouTubeShorts' in changes) {
+        applyShorts((changes.hideYouTubeShorts.newValue as boolean) ?? false);
       }
     });
 
-    // Handle landing directly on a watch page
-    if (location.pathname === '/watch') {
-      setTimeout(setupWatchPage, 500);
-    }
-
-    window.addEventListener('beforeunload', flush);
-
+    // Safety nets only — the poll already keeps the session alive across tab
+    // switches, but these reduce data loss if the tab is killed.
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        flush();
-      } else if (location.pathname === '/watch') {
-        // Restore meta after flush cleared it, then resume timing if playing
-        if (!currentMeta) {
-          currentMeta = readMeta();
-          if (currentMeta) refineMeta(currentMeta.videoId);
-        }
-        if (currentMeta && videoEl && !videoEl.paused) onPlay();
+        checkpoint(true);
+        chrome.storage.local.get('pauseYouTubeOnTabSwitch', (r) => {
+          if (r.pauseYouTubeOnTabSwitch) {
+            const v = document.querySelector('video') as HTMLVideoElement | null;
+            if (v && !v.paused) v.pause();
+          }
+        });
       }
     });
+    window.addEventListener('pagehide', endSession);
+    window.addEventListener('beforeunload', endSession);
   },
 });

@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebPulse — The heartbeat of your browsing</title>
+  <meta name="description" content="A privacy-first Chrome extension for web activity analytics, YouTube deep tracking, on-device AI categorization, site blocking, and Pomodoro." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --indigo:      #4f46e5;
+      --indigo-light:#6366f1;
+      --indigo-dark: #3730a3;
+      --surface:     #f8f7ff;
+      --card:        #ffffff;
+      --text:        #111827;
+      --muted:       #6b7280;
+      --border:      #e5e7eb;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--surface); color: var(--text); line-height: 1.6; }
+    a { color: var(--indigo); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,.88); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px; height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 18px; color: var(--text); }
+    .nav-links { display: flex; gap: 24px; align-items: center; }
+    .nav-links a { font-size: 14px; color: var(--muted); font-weight: 500; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; }
+    .btn:hover { opacity: .88; text-decoration: none; }
+    .btn-primary  { background: var(--indigo); color: #fff; }
+    .btn-ghost    { background: transparent; color: var(--indigo); border: 1.5px solid var(--indigo); }
+    .btn-white    { background: #fff; color: var(--indigo); }
+
+    /* ── Hero ── */
+    .hero { max-width: 820px; margin: 0 auto; padding: 88px 24px 56px; text-align: center; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #ede9fe; color: var(--indigo-dark);
+      font-size: 12px; font-weight: 600; padding: 4px 14px;
+      border-radius: 999px; margin-bottom: 24px;
+      letter-spacing: .4px; text-transform: uppercase;
+    }
+    .hero h1 { font-size: clamp(36px,6vw,62px); font-weight: 800; line-height: 1.1; letter-spacing: -.025em; margin-bottom: 18px; }
+    .hero h1 span { color: var(--indigo); }
+    .hero p { font-size: 18px; color: var(--muted); max-width: 540px; margin: 0 auto 36px; }
+    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* Privacy strip */
+    .privacy-strip { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; padding: 12px 24px 56px; }
+    .privacy-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 500; }
+    .privacy-item .dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+
+    /* ── Dashboard screenshot showcase ── */
+    .showcase { max-width: 1100px; margin: 0 auto 80px; padding: 0 24px; }
+    .showcase-tabs {
+      display: flex; gap: 4px; justify-content: center;
+      background: #fff; border: 1px solid var(--border);
+      border-radius: 12px; padding: 4px;
+      width: fit-content; margin: 0 auto 28px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .stab {
+      padding: 7px 18px; border-radius: 8px; border: none; background: transparent;
+      font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .stab.active { background: var(--indigo); color: #fff; }
+    .stab:hover:not(.active) { background: #f3f4f6; color: var(--text); }
+
+    .screenshot-frame {
+      background: #1e1b4b;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(79,70,229,.22), 0 8px 28px rgba(0,0,0,.14);
+    }
+    .frame-bar {
+      background: #2d2a5e; padding: 10px 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .frame-dot { width: 12px; height: 12px; border-radius: 50%; }
+    .frame-url {
+      flex: 1; background: rgba(255,255,255,.08); border-radius: 6px;
+      height: 24px; margin: 0 12px;
+      display: flex; align-items: center; padding: 0 10px;
+      font-size: 11px; color: rgba(255,255,255,.35);
+    }
+    .sshot-panel { display: none; }
+    .sshot-panel.active { display: block; }
+    .sshot-panel img { width: 100%; display: block; }
+
+    /* ── Popup showcase ── */
+    .popup-section { max-width: 960px; margin: 0 auto 80px; padding: 0 24px; }
+    .popup-grid { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+    .popup-frame {
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.12), 0 2px 8px rgba(0,0,0,.08);
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .popup-frame img { width: 260px; display: block; }
+    .popup-label { font-size: 12px; font-weight: 600; color: var(--muted); text-align: center; margin-top: 10px; text-transform: uppercase; letter-spacing: .5px; }
+
+    /* ── Shared section wrapper ── */
+    .section { max-width: 1040px; margin: 0 auto; padding: 0 24px 80px; }
+    .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--indigo); margin-bottom: 8px; }
+    .section-title { font-size: clamp(26px,4vw,38px); font-weight: 800; letter-spacing: -.02em; margin-bottom: 12px; }
+    .section-sub { font-size: 16px; color: var(--muted); max-width: 520px; margin-bottom: 48px; }
+
+    /* ── Feature grid ── */
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+    .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; transition: box-shadow .15s, transform .15s; }
+    .feature-card:hover { box-shadow: 0 8px 32px rgba(79,70,229,.1); transform: translateY(-2px); }
+    .feature-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 14px; }
+    .feature-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .feature-card p { font-size: 14px; color: var(--muted); line-height: 1.55; }
+
+    /* ── How it works ── */
+    .steps { display: flex; flex-direction: column; }
+    .step { display: grid; grid-template-columns: 48px 1fr; gap: 20px; padding: 24px 0; border-bottom: 1px solid var(--border); }
+    .step:last-child { border-bottom: none; }
+    .step-num { width: 44px; height: 44px; border-radius: 50%; background: var(--indigo); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; flex-shrink: 0; }
+    .step-body h3 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .step-body p { font-size: 14px; color: var(--muted); }
+
+    /* ── Tech pills ── */
+    .tech-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+    .tech-pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 16px; font-size: 13px; font-weight: 600; color: var(--text); }
+
+    /* ── CTA ── */
+    .cta { background: linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%); padding: 80px 24px; text-align: center; }
+    .cta h2 { font-size: clamp(28px,4vw,42px); font-weight: 800; color: #fff; margin-bottom: 12px; letter-spacing: -.02em; }
+    .cta p { color: rgba(255,255,255,.75); font-size: 16px; margin-bottom: 32px; }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; font-size: 13px; color: var(--muted); }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+      .popup-frame img { width: 200px; }
+      .stab { padding: 6px 12px; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-brand">
+    <svg viewBox="0 0 128 128" width="28" height="28">
+      <rect width="128" height="128" rx="28" fill="#1e1b4b"/>
+      <g fill="#4338ca">
+        <circle cx="24" cy="40" r="3"/><circle cx="40" cy="40" r="3"/><circle cx="56" cy="40" r="3"/>
+        <circle cx="72" cy="40" r="3"/><circle cx="88" cy="40" r="3"/><circle cx="104" cy="40" r="3"/>
+        <circle cx="24" cy="88" r="3"/><circle cx="40" cy="88" r="3"/><circle cx="56" cy="88" r="3"/>
+        <circle cx="72" cy="88" r="3"/><circle cx="88" cy="88" r="3"/><circle cx="104" cy="88" r="3"/>
+      </g>
+      <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <g fill="#818cf8">
+        <circle cx="24" cy="64" r="6.5"/><circle cx="40" cy="64" r="6.5"/><circle cx="56" cy="36" r="6.5"/>
+        <circle cx="72" cy="96" r="6.5"/><circle cx="88" cy="52" r="6.5"/><circle cx="104" cy="64" r="6.5"/>
+      </g>
+    </svg>
+    WebPulse
+  </div>
+  <div class="nav-links">
+    <a href="#screenshots">Screenshots</a>
+    <a href="#features">Features</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="https://github.com/salayhin/webpulse" target="_blank">GitHub</a>
+    <a href="https://github.com/salayhin/webpulse" target="_blank" class="btn btn-primary">Install</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="badge">🔒 100% On-Device &nbsp;·&nbsp; No accounts &nbsp;·&nbsp; No servers</div>
+  <h1>The <span>heartbeat</span> of<br>your browsing</h1>
+  <p>WebPulse tracks where your time goes online — deep YouTube analytics, Shorts blocking, AI categorization, site blocking, and a Pomodoro timer. All data stays on your device.</p>
+  <div class="hero-actions">
+    <a href="https://github.com/salayhin/webpulse" target="_blank" class="btn btn-primary">Install from source</a>
+    <a href="https://github.com/salayhin/webpulse" target="_blank" class="btn btn-ghost">View on GitHub</a>
+  </div>
+</section>
+
+<!-- Privacy strip -->
+<div class="privacy-strip">
+  <div class="privacy-item"><span class="dot"></span>All data stored locally</div>
+  <div class="privacy-item"><span class="dot"></span>No telemetry</div>
+  <div class="privacy-item"><span class="dot"></span>No account required</div>
+  <div class="privacy-item"><span class="dot"></span>On-device AI only</div>
+  <div class="privacy-item"><span class="dot"></span>Export or delete anytime</div>
+</div>
+
+<!-- Dashboard screenshot showcase -->
+<div class="showcase" id="screenshots">
+  <div style="text-align:center;margin-bottom:40px">
+    <div class="section-label" style="justify-content:center;display:flex">Dashboard</div>
+    <h2 class="section-title" style="margin-bottom:8px">Everything in one place</h2>
+    <p style="color:var(--muted);font-size:16px">Overview, YouTube analytics, Pomodoro, restrictions and settings — all in one tab.</p>
+  </div>
+
+  <div class="showcase-tabs" role="tablist">
+    <button class="stab active" onclick="showTab('overview')" role="tab">Overview</button>
+    <button class="stab"        onclick="showTab('youtube')"  role="tab">YouTube Stats</button>
+    <button class="stab"        onclick="showTab('pomodoro')" role="tab">Pomodoro</button>
+    <button class="stab"        onclick="showTab('settings')" role="tab">Settings</button>
+    <button class="stab"        onclick="showTab('about')"    role="tab">About</button>
+  </div>
+
+  <div class="screenshot-frame">
+    <div class="frame-bar">
+      <div class="frame-dot" style="background:#ff5f57"></div>
+      <div class="frame-dot" style="background:#febc2e"></div>
+      <div class="frame-dot" style="background:#28c840"></div>
+      <div class="frame-url">chrome-extension://webpulse/dashboard.html</div>
+    </div>
+    <div id="tab-overview" class="sshot-panel active">
+      <img src="screenshots/dashboard-overview-today.png" alt="Overview dashboard showing time stats, activity heatmap, focus sessions and visited sites" loading="lazy" />
+    </div>
+    <div id="tab-youtube" class="sshot-panel">
+      <img src="screenshots/dashboard-youtube-week.png" alt="YouTube Stats showing watch time, heatmap, daily chart and top channels" loading="lazy" />
+    </div>
+    <div id="tab-pomodoro" class="sshot-panel">
+      <img src="screenshots/dashboard-pomodoro-idle.png" alt="Pomodoro timer with configurable work and rest intervals" loading="lazy" />
+    </div>
+    <div id="tab-settings" class="sshot-panel">
+      <img src="screenshots/dashboard-settings.png" alt="Settings panel with YouTube pause toggle and data export" loading="lazy" />
+    </div>
+    <div id="tab-about" class="sshot-panel">
+      <img src="screenshots/dashboard-about.png" alt="About page showing app info and developer details" loading="lazy" />
+    </div>
+  </div>
+</div>
+
+<!-- Popup screenshots -->
+<div class="popup-section">
+  <div style="text-align:center;margin-bottom:40px">
+    <div class="section-label" style="justify-content:center;display:flex">Quick Access</div>
+    <h2 class="section-title" style="margin-bottom:8px">Instant stats from the toolbar</h2>
+    <p style="color:var(--muted);font-size:16px">Click the extension icon for a quick breakdown — Today, lifetime totals, or a date-range daily view.</p>
+  </div>
+
+  <div class="popup-grid">
+    <div>
+      <div class="popup-frame">
+        <img src="screenshots/popup-today.png" alt="Popup Today tab showing donut chart and ranked site list" loading="lazy" />
+      </div>
+      <div class="popup-label">Today</div>
+    </div>
+    <div>
+      <div class="popup-frame">
+        <img src="screenshots/popup-total-time.png" alt="Popup Total Time tab showing lifetime stats" loading="lazy" />
+      </div>
+      <div class="popup-label">Total Time</div>
+    </div>
+    <div>
+      <div class="popup-frame">
+        <img src="screenshots/popup-daily.png" alt="Popup Daily tab with line chart and per-day breakdown" loading="lazy" />
+      </div>
+      <div class="popup-label">Daily</div>
+    </div>
+    <div>
+      <div class="popup-frame">
+        <img src="screenshots/popup-daily-expanded.png" alt="Popup Daily tab with an expanded day showing per-site breakdown" loading="lazy" />
+      </div>
+      <div class="popup-label">Daily (expanded)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<section class="section" id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything you need to understand your time</h2>
+  <p class="section-sub">WebPulse goes beyond simple time tracking — it understands context.</p>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#ede9fe">⏱</div>
+      <h3>Precise Time Tracking</h3>
+      <p>Tracks active tab time with idle detection. Heartbeat-based sessions survive Chrome killing the service worker.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#fce7f3">▶</div>
+      <h3>YouTube Deep Analytics</h3>
+      <p>Per-channel and per-video watch time. Counts actual playback seconds at any speed — not just time on the tab.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#fee2e2">🩳</div>
+      <h3>Hide YouTube Shorts</h3>
+      <p>Removes Shorts from feed, sidebar, search and channel tabs. Redirects <code style="font-size:12px;background:#f3f4f6;padding:1px 5px;border-radius:4px">youtube.com/shorts</code> back to the homepage.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#f0fdf4">⏸</div>
+      <h3>Pause on Tab Switch</h3>
+      <p>Automatically pauses YouTube videos when you switch to another tab. No more audio playing in the background.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#d1fae5">🧠</div>
+      <h3>On-Device AI Categories</h3>
+      <p>Classifies every site using a static rule map first, then Gemini Nano for unknowns. Never leaves your device.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#fef3c7">🍅</div>
+      <h3>Pomodoro Timer</h3>
+      <p>Configurable work/rest intervals with audible tick-tock, chimes, and ambient ocean or rain sounds.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#fee2e2">🚫</div>
+      <h3>Site Blocking</h3>
+      <p>Set daily time limits per domain. Hit your limit and get redirected. One daily defer for when you really need it.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#e0e7ff">📊</div>
+      <h3>Rich Dashboard</h3>
+      <p>Heatmaps, stacked category charts, focus session detection, and ranked site lists — all in one page.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#ecfdf5">📤</div>
+      <h3>CSV Export</h3>
+      <p>Export your browsing history or YouTube watch sessions to CSV for analysis in any tool you like.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#fff7ed">🔔</div>
+      <h3>Smart Notifications</h3>
+      <p>Daily summary at your chosen time. Per-site alerts when you exceed a custom threshold.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon" style="background:#e0f2fe">🔒</div>
+      <h3>100% Private</h3>
+      <p>No servers, no telemetry, no accounts. All data lives in your browser's IndexedDB. Export or delete anytime.</p>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="section" id="how-it-works">
+  <div class="section-label">How it works</div>
+  <h2 class="section-title">Simple, transparent, private</h2>
+  <p class="section-sub">No signup, no cloud. Install, browse, and your data is already there.</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Install from source</h3>
+        <p>Clone the repo, run <code>npm run build</code>, and load the <code>dist/</code> folder as an unpacked extension in Chrome. Takes about two minutes.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Browse normally</h3>
+        <p>The background service worker silently tracks active tab time. No interaction needed — data accumulates automatically.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Open the popup or dashboard</h3>
+        <p>Click the WebPulse icon for a quick overview, or open the full dashboard for deep charts, YouTube stats, and settings.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h3>Tune to your workflow</h3>
+        <p>Block distracting sites, set a Pomodoro schedule, configure notifications — or just observe and learn your patterns.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tech -->
+<section class="section" id="tech">
+  <div class="section-label">Tech Stack</div>
+  <h2 class="section-title">Built on solid foundations</h2>
+  <p class="section-sub">Modern Chrome MV3 extension with React, TypeScript, and on-device AI.</p>
+  <div class="tech-grid">
+    <span class="tech-pill">Chrome MV3</span>
+    <span class="tech-pill">WXT</span>
+    <span class="tech-pill">React 18</span>
+    <span class="tech-pill">TypeScript</span>
+    <span class="tech-pill">Dexie / IndexedDB</span>
+    <span class="tech-pill">Recharts</span>
+    <span class="tech-pill">Gemini Nano (Built-in AI)</span>
+    <span class="tech-pill">Zustand</span>
+    <span class="tech-pill">Web Audio API</span>
+    <span class="tech-pill">Playwright (E2E)</span>
+    <span class="tech-pill">Vitest (unit)</span>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta">
+  <h2>Start tracking your time today</h2>
+  <p>Free, open-source, and entirely private.</p>
+  <a href="https://github.com/salayhin/webpulse" target="_blank" class="btn btn-white">View on GitHub →</a>
+</div>
+
+<!-- Footer -->
+<footer>
+  <p>Built by <a href="https://salayhin.github.io/me/" target="_blank">Sirajus Salayhin</a> &nbsp;·&nbsp; <a href="https://github.com/salayhin/webpulse" target="_blank">GitHub</a> &nbsp;·&nbsp; MIT License</p>
+</footer>
+
+<script>
+  function showTab(id) {
+    document.querySelectorAll('.sshot-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.stab').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + id).classList.add('active');
+    event.currentTarget.classList.add('active');
+  }
+</script>
+</body>
+</html>

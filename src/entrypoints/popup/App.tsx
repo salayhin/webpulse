@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Cell, Pie, PieChart, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Cell, Pie, PieChart, Tooltip, LineChart, Line, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { db, type TimeEntry, type DomainCategory } from '../../db';
 import { localDate } from '../../lib/hostname';
 import { CATEGORY_COLORS, CATEGORY_KEYS, type CategoryKey } from '../../db/queries';
@@ -112,22 +112,42 @@ function openDashboard(hash = ''): void {
   chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') + hash });
 }
 
+/** The Web Pulse mark — dot-grid + pulse waveform, matching the extension icon. */
+function BrandLogo(): React.ReactElement {
+  return (
+    <svg className="brand-logo" viewBox="0 0 128 128" width={22} height={22} aria-hidden="true">
+      <rect width="128" height="128" rx="30" fill="#1e1b4b" />
+      <g fill="#4338ca">
+        <circle cx="24" cy="40" r="3" /><circle cx="40" cy="40" r="3" /><circle cx="56" cy="40" r="3" /><circle cx="72" cy="40" r="3" /><circle cx="88" cy="40" r="3" /><circle cx="104" cy="40" r="3" />
+        <circle cx="24" cy="88" r="3" /><circle cx="40" cy="88" r="3" /><circle cx="56" cy="88" r="3" /><circle cx="72" cy="88" r="3" /><circle cx="88" cy="88" r="3" /><circle cx="104" cy="88" r="3" />
+      </g>
+      <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />
+      <g fill="#818cf8">
+        <circle cx="24" cy="64" r="6.5" /><circle cx="40" cy="64" r="6.5" /><circle cx="56" cy="36" r="6.5" /><circle cx="72" cy="96" r="6.5" /><circle cx="88" cy="52" r="6.5" /><circle cx="104" cy="64" r="6.5" />
+      </g>
+    </svg>
+  );
+}
+
 function Header(): React.ReactElement {
   return (
     <header className="pop-header">
       <div className="brand">
-        <span className="brand-logo">⚡</span>
+        <BrandLogo />
         <span className="brand-title">Web Pulse</span>
       </div>
       <div className="header-actions">
-        <button className="hdr-btn" title="Pomodoro" onClick={() => openDashboard('#pomodoro')}>
-          <span className="hdr-label">Pomodoro</span> <span className="hdr-emoji">🍅</span>
-        </button>
         <button className="hdr-btn" title="Dashboard" onClick={() => openDashboard()}>
-          <span className="hdr-label">Dashboard</span> <span className="hdr-icon">🗖</span>
+          <span className="hdr-emoji">📊</span> <span className="hdr-label">Dashboard</span>
+        </button>
+        <button className="hdr-btn" title="YouTube Stats" onClick={() => openDashboard('#youtube')}>
+          <span className="hdr-emoji" style={{ color: '#ff0000' }}>▶</span> <span className="hdr-label">YouTube</span>
+        </button>
+        <button className="hdr-btn" title="Pomodoro" onClick={() => openDashboard('#pomodoro')}>
+          <span className="hdr-emoji">⏱️</span> <span className="hdr-label">Pomodoro</span>
         </button>
         <button className="hdr-btn" title="Settings" onClick={() => openDashboard('#settings')}>
-          <span className="hdr-label">Settings</span> <span className="hdr-icon">⚙</span>
+          <span className="hdr-emoji">⚙️</span> <span className="hdr-label">Settings</span>
         </button>
       </div>
     </header>
@@ -190,7 +210,7 @@ function Donut({ data, size = 220 }: { data: CategoryAgg[]; size?: number }): Re
             ))}
           </Pie>
           <Tooltip
-            formatter={(v: number) => fmtDur(v)}
+            formatter={(v) => fmtDur(Number(v))}
             contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
             itemStyle={{ color: '#fff' }}
           />
@@ -346,19 +366,18 @@ function TotalTimeTab(): React.ReactElement {
 
   return (
     <div className="view-total">
-      <div className="stat-grid">
-        <StatCard label="The first active day" value={stats.firstActive ? fmtDate(stats.firstActive) : '—'} />
-        <StatCard label="Number of active days" value={String(stats.activeDays)} />
-        <StatCard label="Total number of days" value={String(stats.totalDays)} />
-        <StatCard label="All the time today" value={fmtDur(stats.today)} />
-        <StatCard label="Total time" value={fmtDur(stats.total)} />
-        <StatCard label="Average time for active days" value={fmtDur(stats.avgActive)} />
-      </div>
-
-      <div className="extreme-row">
-        <ExtremeCard label="The most active day" icon="📅✅" date={stats.mostActive!.date} secs={stats.mostActive!.secs} />
-        <ExtremeCard label="The most inactive day" icon="📅✅" date={stats.leastActive!.date} secs={stats.leastActive!.secs} />
-      </div>
+      <table className="stats-table">
+        <tbody>
+          <StatCard label="Active days" value={String(stats.activeDays)} />
+          <StatCard label="Total days tracked" value={String(stats.totalDays)} />
+          <StatCard label="Today" value={fmtDur(stats.today)} />
+          <StatCard label="Total time" value={fmtDur(stats.total)} />
+          <StatCard label="Daily average" value={fmtDur(stats.avgActive)} />
+          <StatCard label="First active day" value={stats.firstActive ? fmtDate(stats.firstActive) : '—'} />
+          <ExtremeCard label="Most active day" icon="📅" date={stats.mostActive!.date} secs={stats.mostActive!.secs} />
+          <ExtremeCard label="Least active day" icon="📅" date={stats.leastActive!.date} secs={stats.leastActive!.secs} />
+        </tbody>
+      </table>
 
       <Donut data={stats.categories} />
 
@@ -406,20 +425,19 @@ function TotalTimeTab(): React.ReactElement {
 
 function StatCard({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
-    <div className="stat-card">
-      <div className="stat-card-label">{label}</div>
-      <div className="stat-card-value">{value}</div>
-    </div>
+    <tr className="stats-row">
+      <td className="stats-label">{label}</td>
+      <td className="stats-value">{value}</td>
+    </tr>
   );
 }
 
 function ExtremeCard({ label, icon, date, secs }: { label: string; icon: string; date: string; secs: number }): React.ReactElement {
   return (
-    <div className="extreme-card">
-      <div className="extreme-label">{label} <span className="extreme-icon">{icon}</span></div>
-      <div className="extreme-date">{fmtDate(date)}</div>
-      <div className="extreme-secs">{fmtDur(secs)}</div>
-    </div>
+    <tr className="stats-row">
+      <td className="stats-label">{label} <span className="extreme-icon">{icon}</span></td>
+      <td className="stats-value">{fmtDate(date)} · {fmtDur(secs)}</td>
+    </tr>
   );
 }
 
@@ -513,17 +531,25 @@ function DailyTab(): React.ReactElement {
           {/* Popup body is 440px and .pop-main has 14px horizontal padding,
               so the chart area is exactly 412px — pass it explicitly to
               avoid ResponsiveContainer's initial -1×-1 measurement glitch. */}
-          <BarChart width={412} height={260} data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <LineChart width={412} height={260} data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
             <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: '#666' }} axisLine={false} tickLine={false} tickFormatter={fmtDur} width={70} />
             <Tooltip
-              formatter={(v: number) => fmtDur(v)}
+              formatter={(v) => fmtDur(Number(v))}
               labelStyle={{ color: '#fff' }}
               contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, color: '#fff', fontSize: 12 }}
             />
-            <Bar dataKey="secs" fill="#6366f1" radius={[2, 2, 0, 0]} />
-          </BarChart>
+            <Line
+              type="monotone"
+              dataKey="secs"
+              stroke="#6366f1"
+              strokeWidth={2}
+              dot={{ r: 3, fill: '#6366f1', strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
+              isAnimationActive={false}
+            />
+          </LineChart>
         </div>
       )}
 

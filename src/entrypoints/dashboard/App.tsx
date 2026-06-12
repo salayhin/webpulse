@@ -19,7 +19,7 @@ import {
 } from '../../lib/sounds';
 
 const COLORS = ['#6366f1','#8b5cf6','#a78bfa','#60a5fa','#34d399','#fbbf24','#f87171','#94a3b8','#fb923c','#e879f9'];
-type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'whitelist' | 'notifications' | 'settings';
+type MainTab = 'overview' | 'youtube' | 'pomodoro' | 'restrictions' | 'about' | 'whitelist' | 'notifications' | 'settings';
 type RangeTab = 'today' | 'week' | 'month';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -323,8 +323,9 @@ function CategoryLegend() {
 // ── YouTube Tab ──────────────────────────────────────────────────────────────
 
 function YouTubeTab() {
-  const [rangeTab, setRangeTab] = useState<RangeTab>('week');
+  const [rangeTab, setRangeTab] = useState<RangeTab>('today');
   const [stats, setStats] = useState({ totalWatchedSeconds: 0, uniqueVideos: 0, sessionCount: 0 });
+  const [ytTotalSecs, setYtTotalSecs] = useState(0);
   const [channels, setChannels] = useState<{ channelName: string; seconds: number; sessions: number }[]>([]);
   const [channelTotal, setChannelTotal] = useState(0);
   const [channelSort, setChannelSort] = useState<'time' | 'sessions'>('time');
@@ -341,6 +342,15 @@ function YouTubeTab() {
         const allVids = await db.videoSessions.toArray();
         setStats(await getYouTubeStats(start, end));
 
+        // Total time on youtube.com from timeEntries — same logic as Overview
+        const rangeEntries = await db.timeEntries
+          .where('date').between(start, end, true, true)
+          .toArray();
+        const ytTotal = rangeEntries
+          .filter(e => e.domain === 'youtube.com')
+          .reduce((s, e) => s + e.duration, 0);
+        setYtTotalSecs(ytTotal);
+
         // Channels in range — watch time, distinct videos, share of total
         const rangeVids = allVids.filter(v => v.date >= start && v.date <= end);
         const chanMap = new Map<string, { seconds: number; sessions: number }>();
@@ -353,7 +363,7 @@ function YouTubeTab() {
         const chans = [...chanMap.entries()]
           .map(([channelName, g]) => ({ channelName, seconds: g.seconds, sessions: g.sessions }));
         setChannels(chans);
-        setChannelTotal(chans.reduce((t, c) => t + c.seconds, 0));
+        setChannelTotal(ytTotal || chans.reduce((t, c) => t + c.seconds, 0));
 
         // Watch heatmap (hour × weekday) across all watch history
         const matrix = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -412,7 +422,7 @@ function YouTubeTab() {
   return (
     <>
       <div className="stats-row">
-        <StatCard label="Watch Time" value={formatDuration(stats.totalWatchedSeconds)} sub={rangeTab} />
+        <StatCard label="YouTube Time" value={formatDuration(ytTotalSecs)} sub={rangeTab} />
         <StatCard label="Videos Watched" value={String(stats.uniqueVideos)} sub={rangeTab} />
         <StatCard label="Sessions" value={String(stats.sessionCount)} sub={rangeTab} />
       </div>
@@ -556,35 +566,32 @@ function AmbientSelect({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
-function SoundSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+// Compact select + preview button for a table cell (the column header carries
+// the "chime when it ends" meaning, so no per-row label is needed).
+function ChimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="sound-row">
-      <span className="sound-label">Sound after complete period</span>
+    <div className="pom-chime">
       <select className="sound-select" value={value} onChange={e => onChange(e.target.value)}>
         {SOUND_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
       </select>
-      <button type="button" className="sound-listen" onClick={() => playPreset(value)} title="Click to listen">
-        ▶ <span>Click to listen</span>
-      </button>
+      <button type="button" className="pom-listen" onClick={() => playPreset(value)} title="Click to listen" aria-label="Listen">▶</button>
     </div>
   );
 }
 
-function MinutesField({ label, mins, onChange }: { label: string; mins: number; onChange: (m: number) => void }) {
+// Minutes stored as a number, edited via a native HH:MM picker.
+function TimeBox({ mins, onChange }: { mins: number; onChange: (m: number) => void }) {
   const val = `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
   return (
-    <div className="pom-field">
-      <label className="pom-field-label">{label}</label>
-      <input
-        type="time"
-        className="pom-time-input"
-        value={val}
-        onChange={e => {
-          const [h, m] = e.target.value.split(':').map(Number);
-          onChange((h || 0) * 60 + (m || 0));
-        }}
-      />
-    </div>
+    <input
+      type="time"
+      className="pom-time-input"
+      value={val}
+      onChange={e => {
+        const [h, m] = e.target.value.split(':').map(Number);
+        onChange((h || 0) * 60 + (m || 0));
+      }}
+    />
   );
 }
 
@@ -604,8 +611,10 @@ function PomodoroTab() {
     (async () => {
       const data = await chrome.storage.local.get('pomodoro');
       const state: PomodoroState = { ...DEFAULT_POM, ...(data.pomodoro || {}) };
-      // Normalize ambient ids — the legacy 'white' option was replaced by
-      // 'wave' / 'rain'; reset to 'none' if the stored value is unknown.
+      // Normalize ambient ids — the synthesized 'wave' / 'brown' presets were
+      // dropped, and the old 'tick' clock is now the bundled 'clock' loop.
+      // Migrate that one; reset anything else unknown to 'none'.
+      if (state.ambientSound === 'tick') state.ambientSound = 'clock';
       if (!AMBIENT_OPTIONS.some(o => o.id === state.ambientSound)) {
         state.ambientSound = DEFAULT_AMBIENT;
       }
@@ -624,7 +633,7 @@ function PomodoroTab() {
     if (pom.mode === 'idle') return;
     const interval = setInterval(async () => {
       const data = await chrome.storage.local.get('pomodoro');
-      const current: PomodoroState | undefined = data.pomodoro;
+      const current = data.pomodoro as PomodoroState | undefined;
       if (!current || !current.startedAt) { setDisplaySecs(0); return; }
       const duration = (current.mode === 'work' ? current.workMins : current.restMins) * 60;
       const elapsed = Math.floor((Date.now() - current.startedAt) / 1000);
@@ -699,21 +708,44 @@ function PomodoroTab() {
         </>
       ) : (
         <>
-          <MinutesField label="Period of work" mins={workMins} onChange={setWorkMins} />
-          <SoundSelect value={workSound} onChange={setWorkSound} />
-
-          <MinutesField label="Period of rest" mins={restMins} onChange={setRestMins} />
-          <SoundSelect value={restSound} onChange={setRestSound} />
-
-          <div className="pom-field">
-            <label className="pom-field-label">Number of repetitions</label>
-            <input
-              type="number" min="1" max="12" className="pom-reps-input"
-              value={reps}
-              onChange={e => setReps(e.target.value)}
-            />
+          <div className="pom-settings-head">
+            <span className="pom-repeat">
+              <span>Repeat</span>
+              <input
+                type="number" min="1" max="12" className="pom-reps-input"
+                value={reps}
+                onChange={e => setReps(e.target.value)}
+              />
+              <span>{reps === '1' ? 'time' : 'times'}</span>
+            </span>
           </div>
-          <SoundSelect value={doneSound} onChange={setDoneSound} />
+
+          <table className="pom-table">
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Length</th>
+                <th>Chime when it ends</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="pom-phase"><span className="pom-phase-icon">🎯</span>Focus</td>
+                <td><TimeBox mins={workMins} onChange={setWorkMins} /></td>
+                <td><ChimeSelect value={workSound} onChange={setWorkSound} /></td>
+              </tr>
+              <tr>
+                <td className="pom-phase"><span className="pom-phase-icon">☕</span>Break</td>
+                <td><TimeBox mins={restMins} onChange={setRestMins} /></td>
+                <td><ChimeSelect value={restSound} onChange={setRestSound} /></td>
+              </tr>
+              <tr>
+                <td className="pom-phase"><span className="pom-phase-icon">🏁</span>All done</td>
+                <td className="pom-after">after {reps}</td>
+                <td><ChimeSelect value={doneSound} onChange={setDoneSound} /></td>
+              </tr>
+            </tbody>
+          </table>
 
           <AmbientSelect value={ambient} onChange={setAmbient} />
 
@@ -836,7 +868,7 @@ function RestrictionsTab() {
               const [h, m] = e.target.value.split(':');
               setLimitMins(String(parseInt(h) * 60 + parseInt(m)));
             }}
-            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
+            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '92px', outline: 'none' }}
           />
           <button
             onClick={() => setLimitMins('60')}
@@ -1092,7 +1124,7 @@ function NotificationsTab() {
               const [h, m] = e.target.value.split(':');
               setNotifyInterval(String(parseInt(h) * 60 + parseInt(m)));
             }}
-            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '60px', outline: 'none' }}
+            style={{ border: 'none', background: 'transparent', fontSize: '13px', color: '#111', cursor: 'pointer', width: '92px', outline: 'none' }}
           />
           <button
             onClick={() => setNotifyInterval('30')}
@@ -1141,22 +1173,114 @@ function NotificationsTab() {
 }
 
 function SettingsTab() {
+  const [pauseOnSwitch, setPauseOnSwitch] = useState(false);
+  const [hideShorts, setHideShorts] = useState(false);
+
+  useEffect(() => {
+    chrome.storage.local.get(['pauseYouTubeOnTabSwitch', 'hideYouTubeShorts'], (r) => {
+      setPauseOnSwitch((r.pauseYouTubeOnTabSwitch as boolean) ?? false);
+      setHideShorts((r.hideYouTubeShorts as boolean) ?? false);
+    });
+  }, []);
+
+  function togglePause(enabled: boolean) {
+    setPauseOnSwitch(enabled);
+    chrome.storage.local.set({ pauseYouTubeOnTabSwitch: enabled });
+  }
+
+  function toggleShorts(enabled: boolean) {
+    setHideShorts(enabled);
+    chrome.storage.local.set({ hideYouTubeShorts: enabled });
+  }
+
   return (
-    <section className="card">
-      <h2 className="card-title">Export Data</h2>
-      <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
-      <div className="export-buttons">
-        <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
-          📹 Export YouTube Only
-        </button>
-        <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
-          🌐 Export Browsing Only
-        </button>
-        <button className="btn btn-secondary" onClick={() => exportAll()}>
-          📥 Export All Data
-        </button>
-      </div>
-    </section>
+    <>
+      <section className="card">
+        <h2 className="card-title">YouTube</h2>
+        <label className="toggle-row">
+          <span className="toggle-label">Pause video when switching tabs</span>
+          <input
+            type="checkbox"
+            className="toggle-check"
+            checked={pauseOnSwitch}
+            onChange={e => togglePause(e.target.checked)}
+          />
+        </label>
+        <label className="toggle-row" style={{ marginTop: 12 }}>
+          <span className="toggle-label">Hide Shorts</span>
+          <input
+            type="checkbox"
+            className="toggle-check"
+            checked={hideShorts}
+            onChange={e => toggleShorts(e.target.checked)}
+          />
+        </label>
+      </section>
+
+      <section className="card">
+        <h2 className="card-title">Export Data</h2>
+        <p className="card-subtitle">Download your activity and video watch history as CSV files.</p>
+        <div className="export-buttons">
+          <button className="btn btn-primary" onClick={() => exportVideoSessions()}>
+            📹 Export YouTube Only
+          </button>
+          <button className="btn btn-primary" onClick={() => exportTimeEntries()}>
+            🌐 Export Browsing Only
+          </button>
+          <button className="btn btn-secondary" onClick={() => exportAll()}>
+            📥 Export All Data
+          </button>
+        </div>
+      </section>
+
+    </>
+  );
+}
+
+// ── About Tab ────────────────────────────────────────────────────────────────
+
+function AboutTab() {
+  return (
+    <div className="about-page">
+      <section className="card about-card">
+
+        {/* App info */}
+        <div className="about-app-header">
+          <span className="about-app-version">v0.1.0</span>
+        </div>
+        <p className="about-desc">
+          The heartbeat of your browsing — privacy-first web activity analytics,
+          YouTube deep tracking, on-device AI categorization, site blocking, and
+          Pomodoro timer. All data stays on your device.
+        </p>
+
+        <div className="about-divider" />
+
+        {/* Developer */}
+        <div className="about-dev-row">
+          <div className="dev-avatar">SS</div>
+          <div className="dev-info">
+            <div className="dev-name">Sirajus Salayhin</div>
+            <a className="dev-email" href="mailto:salayhin.lab@gmail.com">
+              salayhin.lab@gmail.com
+            </a>
+            <a className="dev-web" href="https://salayhin.github.io/me/" target="_blank" rel="noreferrer">
+              salayhin.github.io/me
+            </a>
+          </div>
+        </div>
+
+        <div className="about-divider" />
+
+        <div className="about-footer-row">
+          <span className="about-license">MIT License</span>
+          <a className="about-gh-link" href="https://github.com/salayhin/webpulse" target="_blank" rel="noreferrer">
+            github.com/salayhin/webpulse
+          </a>
+        </div>
+
+      </section>
+    </div>
   );
 }
 
@@ -1209,13 +1333,41 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 
 // ── Root App ─────────────────────────────────────────────────────────────────
 
+// The popup deep-links into a section via the URL hash (e.g. dashboard.html#pomodoro).
+const TAB_IDS: MainTab[] = ['overview', 'youtube', 'pomodoro', 'restrictions', 'whitelist', 'notifications', 'settings', 'about'];
+function tabFromHash(): MainTab {
+  const h = window.location.hash.replace(/^#/, '') as MainTab;
+  return TAB_IDS.includes(h) ? h : 'overview';
+}
+
 export default function App() {
-  const [tab, setTab] = useState<MainTab>('overview');
+  const [tab, setTab] = useState<MainTab>(tabFromHash);
+
+  // Honor later hash changes too (e.g. clicking another popup link while the
+  // dashboard tab is already open and focused).
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   return (
     <div className="dashboard">
       <aside className="sidebar">
-        <button className="logo" onClick={() => setTab('overview')} title="Home" aria-label="Home">⚡ WebPulse</button>
+        <button className="logo" onClick={() => setTab('overview')} title="Home" aria-label="Home">
+          <svg className="logo-mark" viewBox="0 0 128 128" width={26} height={26} aria-hidden="true">
+            <rect width="128" height="128" rx="30" fill="#1e1b4b" />
+            <g fill="#4338ca">
+              <circle cx="24" cy="40" r="3" /><circle cx="40" cy="40" r="3" /><circle cx="56" cy="40" r="3" /><circle cx="72" cy="40" r="3" /><circle cx="88" cy="40" r="3" /><circle cx="104" cy="40" r="3" />
+              <circle cx="24" cy="88" r="3" /><circle cx="40" cy="88" r="3" /><circle cx="56" cy="88" r="3" /><circle cx="72" cy="88" r="3" /><circle cx="88" cy="88" r="3" /><circle cx="104" cy="88" r="3" />
+            </g>
+            <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />
+            <g fill="#818cf8">
+              <circle cx="24" cy="64" r="6.5" /><circle cx="40" cy="64" r="6.5" /><circle cx="56" cy="36" r="6.5" /><circle cx="72" cy="96" r="6.5" /><circle cx="88" cy="52" r="6.5" /><circle cx="104" cy="64" r="6.5" />
+            </g>
+          </svg>
+          <span>Web Pulse</span>
+        </button>
         <nav className="main-tabs">
           <button className={`main-tab ${tab === 'overview' ? 'main-tab-active' : ''}`} onClick={() => setTab('overview')}>📊 Dashboard</button>
           <button className={`main-tab ${tab === 'youtube' ? 'main-tab-active' : ''}`} onClick={() => setTab('youtube')}>
@@ -1237,11 +1389,14 @@ export default function App() {
             ⚙️ Settings
           </button>
         </nav>
+        <button className={`main-tab main-tab-about ${tab === 'about' ? 'main-tab-active' : ''}`} onClick={() => setTab('about')}>
+          ℹ️ About
+        </button>
       </aside>
 
       <main className="dash-main">
         <ErrorBoundary>
-          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : tab === 'pomodoro' ? <PomodoroTab /> : tab === 'restrictions' ? <RestrictionsTab /> : tab === 'whitelist' ? <WhitelistTab /> : tab === 'notifications' ? <NotificationsTab /> : <SettingsTab />}
+          {tab === 'overview' ? <OverviewTab /> : tab === 'youtube' ? <YouTubeTab /> : tab === 'pomodoro' ? <PomodoroTab /> : tab === 'restrictions' ? <RestrictionsTab /> : tab === 'whitelist' ? <WhitelistTab /> : tab === 'notifications' ? <NotificationsTab /> : tab === 'settings' ? <SettingsTab /> : <AboutTab />}
         </ErrorBoundary>
       </main>
     </div>
