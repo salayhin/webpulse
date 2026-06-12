@@ -27,7 +27,7 @@
         color: #6b7280;
         margin-bottom: 48px;
       }
-      .brand-icon { font-size: 28px; }
+      .brand-icon { width: 32px; height: 32px; flex-shrink: 0; }
       .headline { font-size: 22px; color: #111; margin: 0 0 24px; }
       .site {
         display: flex;
@@ -66,7 +66,23 @@
   </head>
   <body>
     <div class="page">
-      <div class="brand"><span class="brand-icon">⚡</span> WebPulse</div>
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+          <rect width="128" height="128" rx="28" fill="#1e1b4b"/>
+          <g fill="#4338ca">
+            <circle cx="24" cy="40" r="3"/><circle cx="40" cy="40" r="3"/><circle cx="56" cy="40" r="3"/>
+            <circle cx="72" cy="40" r="3"/><circle cx="88" cy="40" r="3"/><circle cx="104" cy="40" r="3"/>
+            <circle cx="24" cy="88" r="3"/><circle cx="40" cy="88" r="3"/><circle cx="56" cy="88" r="3"/>
+            <circle cx="72" cy="88" r="3"/><circle cx="88" cy="88" r="3"/><circle cx="104" cy="88" r="3"/>
+          </g>
+          <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <g fill="#818cf8">
+            <circle cx="24" cy="64" r="6.5"/><circle cx="40" cy="64" r="6.5"/><circle cx="56" cy="36" r="6.5"/>
+            <circle cx="72" cy="96" r="6.5"/><circle cx="88" cy="52" r="6.5"/><circle cx="104" cy="64" r="6.5"/>
+          </g>
+        </svg>
+        WebPulse
+      </div>
       <p class="headline">You've reached your limit for today on</p>
       <div class="site">
         <img id="favicon" alt="" />
