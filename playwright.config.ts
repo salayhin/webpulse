@@ -27,7 +27,7 @@ export default defineConfig({
     {
       name: 'extension',
       use: { viewport: { width: 1280, height: 820 } },
-      testMatch: '**/dashboard.spec.ts',
+      testMatch: ['**/dashboard.spec.ts', '**/youtube-screenshot.spec.ts'],
     },
     {
       name: 'popup',
