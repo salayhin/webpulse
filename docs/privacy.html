@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — WebPulse</title>
+  <meta name="description" content="WebPulse privacy policy. All data stays on your device. No servers, no telemetry, no accounts." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --indigo:      #4f46e5;
+      --indigo-light:#6366f1;
+      --indigo-dark: #3730a3;
+      --surface:     #f8f7ff;
+      --card:        #ffffff;
+      --text:        #111827;
+      --muted:       #6b7280;
+      --border:      #e5e7eb;
+    }
+
+    html { scroll-behavior: smooth; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--surface); color: var(--text); line-height: 1.7; }
+    a { color: var(--indigo); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(255,255,255,.88); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 32px; height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+    .nav-links { display: flex; gap: 24px; align-items: center; }
+    .nav-links a { font-size: 14px; color: var(--muted); font-weight: 500; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: opacity .15s; text-decoration: none; }
+    .btn:hover { opacity: .88; }
+    .btn-primary { background: var(--indigo); color: #fff; }
+
+    /* ── Content ── */
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 80px;
+    }
+    .effective {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 48px;
+      display: block;
+    }
+    h1 {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 8px;
+      line-height: 1.15;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 40px 0 10px;
+      color: var(--text);
+    }
+    p { font-size: 15px; color: #374151; margin-bottom: 12px; }
+    ul { padding-left: 20px; margin-bottom: 12px; }
+    ul li { font-size: 15px; color: #374151; margin-bottom: 6px; }
+    .highlight {
+      background: #ede9fe;
+      border-left: 3px solid var(--indigo);
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin: 24px 0;
+      font-size: 15px;
+      color: var(--indigo-dark);
+      font-weight: 500;
+    }
+
+    /* ── Footer ── */
+    footer { border-top: 1px solid var(--border); padding: 32px 24px; text-align: center; font-size: 13px; color: var(--muted); }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <a href="/" class="nav-brand">
+    <svg viewBox="0 0 128 128" width="28" height="28">
+      <rect width="128" height="128" rx="28" fill="#1e1b4b"/>
+      <g fill="#4338ca">
+        <circle cx="24" cy="40" r="3"/><circle cx="40" cy="40" r="3"/><circle cx="56" cy="40" r="3"/>
+        <circle cx="72" cy="40" r="3"/><circle cx="88" cy="40" r="3"/><circle cx="104" cy="40" r="3"/>
+        <circle cx="24" cy="88" r="3"/><circle cx="40" cy="88" r="3"/><circle cx="56" cy="88" r="3"/>
+        <circle cx="72" cy="88" r="3"/><circle cx="88" cy="88" r="3"/><circle cx="104" cy="88" r="3"/>
+      </g>
+      <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <g fill="#818cf8">
+        <circle cx="24" cy="64" r="6.5"/><circle cx="40" cy="64" r="6.5"/><circle cx="56" cy="36" r="6.5"/>
+        <circle cx="72" cy="96" r="6.5"/><circle cx="88" cy="52" r="6.5"/><circle cx="104" cy="64" r="6.5"/>
+      </g>
+    </svg>
+    WebPulse
+  </a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/#features">Features</a>
+    <a href="https://github.com/salayhin/webpulse" target="_blank">GitHub</a>
+    <a href="https://github.com/salayhin/webpulse" target="_blank" class="btn btn-primary">Install</a>
+  </div>
+</nav>
+
+<!-- Content -->
+<main>
+  <h1>Privacy Policy</h1>
+  <span class="effective">Effective: June 2026</span>
+
+  <div class="highlight">
+    WebPulse stores all data locally in your browser. Nothing is ever sent to a server. There are no accounts, no analytics, and no third-party services.
+  </div>
+
+  <h2>What we store</h2>
+  <p>WebPulse stores the following data in your browser's IndexedDB:</p>
+  <ul>
+    <li><strong>Domain visit times</strong> — the domain name, date, and duration of each browsing session</li>
+    <li><strong>YouTube watch sessions</strong> — video ID, title, channel name, category, and seconds watched</li>
+    <li><strong>Site restrictions</strong> — domains you have set daily time limits on, and their limits</li>
+    <li><strong>Settings</strong> — your preferences (ignored domains, notification settings, Pomodoro configuration)</li>
+  </ul>
+  <p>No personal identifiers, passwords, page content, or form data are ever read or stored.</p>
+
+  <h2>Where your data lives</h2>
+  <p>All data is stored exclusively in your browser's IndexedDB under the extension's origin. It never leaves your device. It is not synced to any cloud service, not backed up to any server, and not accessible to any website or third party.</p>
+
+  <h2>What we do not do</h2>
+  <ul>
+    <li>We do not transmit any data to any server</li>
+    <li>We do not collect analytics or usage metrics</li>
+    <li>We do not use any third-party SDKs, trackers, or ad networks</li>
+    <li>We do not require an account or sign-in</li>
+    <li>We do not share or sell any data</li>
+  </ul>
+
+  <h2>On-device AI</h2>
+  <p>WebPulse can use Gemini Nano — Chrome's built-in AI model — to categorise websites that are not in its built-in rule map. This feature runs entirely inside Chrome on your device. No network request is made; no data is sent to Google or any other party.</p>
+
+  <h2>How to delete your data</h2>
+  <p>Open the WebPulse dashboard, go to the <strong>Settings</strong> tab, and click <strong>Wipe all data</strong>. This permanently deletes all stored entries from IndexedDB.</p>
+  <p>Uninstalling the extension also removes all stored data, as Chrome clears the extension's storage on uninstall.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If we make material changes to this policy, we will update the effective date above. Continued use of the extension after changes constitutes acceptance of the updated policy.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy? Email <a href="mailto:salayhin.lab@gmail.com">salayhin.lab@gmail.com</a>.</p>
+</main>
+
+<!-- Footer -->
+<footer>
+  <p>Built by <a href="https://salayhin.github.io/me/" target="_blank">Sirajus Salayhin</a> &nbsp;·&nbsp; <a href="https://github.com/salayhin/webpulse" target="_blank">GitHub</a> &nbsp;·&nbsp; MIT License</p>
+</footer>
+
+</body>
+</html>
