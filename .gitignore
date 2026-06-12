@@ -6,4 +6,5 @@ dist/
 *.zip
 tests/screenshots/
 tests/playwright-report/
+.playwright-out/
 # docs/screenshots/ is intentionally committed for GitHub Pages
