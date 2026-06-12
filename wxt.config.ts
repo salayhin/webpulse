@@ -8,7 +8,8 @@ export default defineConfig({
   manifest: {
     name: 'WebPulse',
     description: 'The heartbeat of your browsing — advanced web activity analytics',
-    version: '0.1.0',
+    version: '1.0.0',
+    homepage_url: 'https://salayhin.github.io/webpulse',
     permissions: ['tabs', 'activeTab', 'storage', 'idle', 'alarms', 'notifications', 'offscreen'],
     host_permissions: ['<all_urls>'],
     options_page: 'dashboard.html',
