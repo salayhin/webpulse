@@ -24,3 +24,13 @@ test('920×680 large promotional tile', async ({ browser }) => {
   await page.screenshot({ path: path.join(OUT, 'promo-920x680.png'), fullPage: false });
   await ctx.close();
 });
+
+test('1400×560 marquee promotional tile', async ({ browser }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 560 } });
+  const page = await ctx.newPage();
+  await page.goto(PROMO);
+  await page.waitForLoadState('networkidle');
+  await page.screenshot({ path: path.join(OUT, 'promo-1400x560.png'), fullPage: false });
+  await ctx.close();
+});

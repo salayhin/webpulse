@@ -74,15 +74,15 @@ Open source: github.com/salayhin/webpulse
 
 Upload in this exact order from `docs/store-assets/screenshots/`:
 
-| # | File | Shows |
-|---|---|---|
-| 1 | `01-overview.png` | Dashboard — activity heatmap + daily category chart |
-| 2 | `02-youtube.png` | YouTube Stats — watch heatmap + channel list |
-| 3 | `03-pomodoro.png` | Pomodoro timer with Focus/Break/Done phases |
-| 4 | `04-restrictions.png` | Site blocking + daily limits |
-| 5 | `05-popup.png` | Quick-access popup — Today view |
+| # | File | Size | Shows |
+|---|---|---|---|
+| 1 | `01-overview.jpg` | 1280×800 | Dashboard — activity heatmap + daily category chart |
+| 2 | `02-youtube.jpg` | 1280×800 | YouTube Stats — watch heatmap + channel list |
+| 3 | `03-pomodoro.jpg` | 1280×800 | Pomodoro timer with Focus/Break/Done phases |
+| 4 | `04-restrictions.jpg` | 1280×800 | Site blocking + daily limits |
+| 5 | `05-popup.jpg` | 640×400 | Quick-access popup — Today tab donut chart |
 
-All screenshots are 1280×800 as required.
+All screenshots are JPEG (no alpha), meeting the "JPEG or 24-bit PNG (no alpha)" requirement.
 
 ---
 
@@ -102,6 +102,7 @@ The Chrome Web Store requires the icon to be uploaded separately — it is **not
 |---|---|---|
 | Small promotional tile | `docs/store-assets/promo-440x280.png` | 440×280 |
 | Large promotional tile | `docs/store-assets/promo-920x680.png` | 920×680 |
+| Marquee promotional tile | `docs/store-assets/promo-1400x560.png` | 1400×560 |
 
 ---
 
