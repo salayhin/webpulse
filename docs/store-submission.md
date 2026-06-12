@@ -86,7 +86,17 @@ All screenshots are 1280×800 as required.
 
 ---
 
-## Step 5 — Promotional images
+## Step 5 — Store icon
+
+The Chrome Web Store requires the icon to be uploaded separately — it is **not** extracted from the ZIP automatically.
+
+| Slot | File | Size |
+|---|---|---|
+| **Store icon** | `src/public/icon/128.png` | 128×128 |
+
+---
+
+## Step 6 — Promotional images
 
 | Slot | File | Size |
 |---|---|---|
@@ -95,7 +105,7 @@ All screenshots are 1280×800 as required.
 
 ---
 
-## Step 6 — Privacy practices
+## Step 7 — Privacy practices
 
 1. Click the **Privacy practices** tab
 2. **Single purpose:** `Tracks browser activity and YouTube watch time locally on the user's device`
@@ -111,7 +121,7 @@ All screenshots are 1280×800 as required.
 
 ---
 
-## Step 7 — Distribution
+## Step 8 — Distribution
 
 | Setting | Value |
 |---|---|
@@ -121,7 +131,7 @@ All screenshots are 1280×800 as required.
 
 ---
 
-## Step 8 — Submit
+## Step 9 — Submit
 
 1. Click **Submit for review**
 2. Expected review time: **1–3 business days**
