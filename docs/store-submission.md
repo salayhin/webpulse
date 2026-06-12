@@ -111,14 +111,59 @@ The Chrome Web Store requires the icon to be uploaded separately — it is **not
 1. Click the **Privacy practices** tab
 2. **Single purpose:** `Tracks browser activity and YouTube watch time locally on the user's device`
 3. **Privacy policy URL:** `https://salayhin.github.io/webpulse/privacy`
-4. **Permissions justification** (Chrome will ask about `<all_urls>` and `tabs`):
-   - `tabs` + `<all_urls>`: *"Content scripts must run on all tabs to detect the active tab's domain and track time. No page content is read — only the tab URL and title."*
-   - `notifications`: *"Used to send a daily activity summary and per-site alerts when a configured time threshold is reached."*
-   - `offscreen`: *"Used to run Gemini Nano (Chrome's built-in AI) for on-device site categorisation, as the Prompt API is unavailable in service workers."*
-5. **Data use disclosures** — tick both:
+
+### Permission justifications
+
+Copy each text into the corresponding field (max 1,000 chars each):
+
+**tabs justification**
+```
+Required to read the URL and title of the currently active tab. WebPulse tracks time spent per domain by monitoring which tab is active and when it changes. Only the tab URL and title are accessed — no page content, passwords, or form data are ever read.
+```
+
+**activeTab justification**
+```
+Required to detect when the user switches between tabs, which triggers the start and end of a tracked browsing session. Without this permission the extension cannot measure how long the user spends on each domain.
+```
+
+**storage justification**
+```
+Required to persist Pomodoro timer state (current phase, elapsed time, configuration) in chrome.storage.local. This state must survive the service worker being terminated between alarm firings, which is standard behaviour in Manifest V3.
+```
+
+**idle justification**
+```
+Required to detect when the user is idle (away from keyboard or screen locked). When idle is detected the active session timer is paused so idle time is not incorrectly attributed to a domain, ensuring time-tracking accuracy.
+```
+
+**alarms justification**
+```
+Required as the primary timing mechanism in Manifest V3. Service workers cannot use setInterval reliably as Chrome terminates them after inactivity. A 1-minute alarm heartbeat flushes in-progress sessions and triggers Pomodoro phase transitions and daily notification delivery.
+```
+
+**notifications justification**
+```
+Required to deliver two types of user-configured notifications: (1) a daily activity summary at a user-specified time, and (2) per-site alerts when the user exceeds a self-set time threshold on a domain. Both features are opt-in and fully configurable from the Settings tab.
+```
+
+**offscreen justification**
+```
+Required to run Chrome's built-in Gemini Nano (Prompt API) for on-device site categorisation. The LanguageModel API is unavailable in Manifest V3 service workers, so an offscreen document is used as a proxy. No data leaves the device — all inference runs locally inside Chrome.
+```
+
+**Host permission justification**
+```
+Content scripts must be injected into every tab to detect user activity (mouse, keyboard, scroll events) and to scrape YouTube watch metadata for deep video analytics. The scripts read only tab activity signals and YouTube DOM metadata — no page content, passwords, or form data are accessed. The host permission cannot be narrowed because the user may visit any domain.
+```
+
+### Remote code
+
+Select **"No, I am not using remote code"**. All JavaScript is bundled in the extension package at build time via WXT/Vite. No external scripts are loaded and eval() is not used.
+
+4. **Data use disclosures** — tick both:
    - ✅ Website content (tab URLs for time tracking)
    - ✅ User activity (browsing time, YouTube watch sessions)
-6. **Certify:** *"This extension does not sell or transfer user data to third parties outside of the approved use cases"* ✅
+5. **Certify:** *"This extension does not sell or transfer user data to third parties outside of the approved use cases"* ✅
 
 ---
 
