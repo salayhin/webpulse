@@ -34,7 +34,7 @@ Output: `webpulse-1.0.0.zip` in the project root.
 |---|---|
 | **Name** | WebPulse |
 | **Short description** | Privacy-first web activity tracker with YouTube deep analytics, site blocking, AI categorisation, and a Pomodoro timer. |
-| **Category** | Productivity |
+| **Category** | **Tools** (under Productivity → Tools) — if not available, pick **Productivity → Workflow & Planning** or the closest "Tools" subcategory shown |
 | **Language** | English (United Kingdom) |
 
 ### Full description
