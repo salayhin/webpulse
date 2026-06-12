@@ -83,8 +83,14 @@ body {
   width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0;
 }
 .legend-name {
+  flex: 1;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: #4b5563;
+}
+.legend-pct {
+  font-variant-numeric: tabular-nums;
+  color: #9ca3af;
+  font-size: 11px;
 }
 
 /* ── Summary bar (Today) + Aggregate bar (Total) ──────────────────────── */

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Cell, Pie, PieChart, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { db, type TimeEntry } from '../../db';
+import { db, type TimeEntry, type DomainCategory } from '../../db';
 import { localDate } from '../../lib/hostname';
+import { CATEGORY_COLORS, CATEGORY_KEYS, type CategoryKey } from '../../db/queries';
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
 
@@ -45,13 +46,6 @@ function shiftDate(iso: string, deltaDays: number): string {
   return localDate(d.getTime());
 }
 
-// ── Palette ─────────────────────────────────────────────────────────────────
-// 10 distinct hues to differentiate slices. Wraps if there are more domains.
-const PIE_COLORS = [
-  '#6366f1', '#8b5cf6', '#d946ef', '#ec4899', '#f43f5e',
-  '#f97316', '#eab308', '#bef264', '#86efac', '#22c55e',
-];
-
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
 interface SiteAgg {
@@ -69,6 +63,38 @@ function aggregate(entries: TimeEntry[]): SiteAgg[] {
     map.set(e.domain, cur);
   }
   return [...map.values()];
+}
+
+// ── Category aggregation ────────────────────────────────────────────────────
+
+interface CategoryAgg {
+  category: CategoryKey;
+  seconds: number;
+}
+
+/** Pretty labels for the donut legend — capitalised category keys. */
+const CATEGORY_LABELS: Record<CategoryKey, string> = {
+  productivity: 'Productivity',
+  social: 'Social',
+  entertainment: 'Entertainment',
+  news: 'News',
+  education: 'Education',
+  other: 'Other',
+  uncategorized: 'Uncategorized',
+};
+
+function aggregateByCategory(entries: TimeEntry[], cats: DomainCategory[]): CategoryAgg[] {
+  const catMap = new Map(cats.map(c => [c.domain, c.category as CategoryKey]));
+  const buckets = new Map<CategoryKey, number>();
+  for (const k of CATEGORY_KEYS) buckets.set(k, 0);
+  for (const e of entries) {
+    const k = catMap.get(e.domain) ?? 'uncategorized';
+    buckets.set(k, (buckets.get(k) ?? 0) + e.duration);
+  }
+  return [...buckets.entries()]
+    .filter(([, secs]) => secs > 0)
+    .map(([category, seconds]) => ({ category, seconds }))
+    .sort((a, b) => b.seconds - a.seconds);
 }
 
 type SortKey = 'time' | 'sessions' | 'name';
@@ -135,14 +161,13 @@ function Tabs({ tab, onTab }: { tab: TabKey; onTab: (t: TabKey) => void }): Reac
 
 // ── Shared donut + legend ───────────────────────────────────────────────────
 
-function Donut({ data, size = 220 }: { data: SiteAgg[]; size?: number }): React.ReactElement {
-  const top = data.slice(0, 10);
-  const pieData = top.map(d => ({ name: d.domain, value: d.seconds }));
-  // Use fixed width/height on PieChart instead of ResponsiveContainer.
-  // ResponsiveContainer measures via ResizeObserver and can fire with
-  // width/height = -1 on the popup's very first paint, which produces the
-  // "width(-1) and height(-1)" Recharts warning. The donut is a known size
-  // so we can skip auto-sizing entirely.
+function Donut({ data, size = 220 }: { data: CategoryAgg[]; size?: number }): React.ReactElement {
+  // Donut shows the category mix (productivity / social / entertainment / …)
+  // rather than individual domains — gives a higher-level view of where time
+  // went. The ranked list below still shows per-domain detail.
+  const pieData = data.map(d => ({ name: CATEGORY_LABELS[d.category], value: d.seconds, color: CATEGORY_COLORS[d.category] }));
+  // Fixed PieChart dimensions avoid the ResponsiveContainer -1x-1 glitch on
+  // the popup's first paint.
   return (
     <div className="donut-wrap">
       <div className="donut" style={{ width: size, height: size }}>
@@ -160,8 +185,8 @@ function Donut({ data, size = 220 }: { data: SiteAgg[]; size?: number }): React.
             strokeWidth={2}
             isAnimationActive={false}
           >
-            {pieData.map((_, i) => (
-              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+            {pieData.map((d, i) => (
+              <Cell key={i} fill={d.color} />
             ))}
           </Pie>
           <Tooltip
@@ -172,12 +197,17 @@ function Donut({ data, size = 220 }: { data: SiteAgg[]; size?: number }): React.
         </PieChart>
       </div>
       <ul className="legend">
-        {top.map((d, i) => (
-          <li key={d.domain} className="legend-item">
-            <span className="legend-dot" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-            <span className="legend-name" title={d.domain}>{d.domain}</span>
-          </li>
-        ))}
+        {data.map(d => {
+          const total = data.reduce((s, x) => s + x.seconds, 0);
+          const pct = total > 0 ? (d.seconds / total) * 100 : 0;
+          return (
+            <li key={d.category} className="legend-item">
+              <span className="legend-dot" style={{ background: CATEGORY_COLORS[d.category] }} />
+              <span className="legend-name">{CATEGORY_LABELS[d.category]}</span>
+              <span className="legend-pct">{pct.toFixed(0)}%</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -187,17 +217,23 @@ function Donut({ data, size = 220 }: { data: SiteAgg[]; size?: number }): React.
 
 function TodayTab(): React.ReactElement {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [cats, setCats] = useState<DomainCategory[]>([]);
   const [sortBy, setSortBy] = useState<SortKey>('time');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    db.timeEntries.where('date').equals(localDate()).toArray().then(rows => {
+    Promise.all([
+      db.timeEntries.where('date').equals(localDate()).toArray(),
+      db.domainCategories.toArray(),
+    ]).then(([rows, catRows]) => {
       setEntries(rows);
+      setCats(catRows);
       setLoading(false);
     });
   }, []);
 
   const sites = useMemo(() => aggregate(entries), [entries]);
+  const categories = useMemo(() => aggregateByCategory(entries, cats), [entries, cats]);
   const sorted = useMemo(() => sortSites(sites, sortBy), [sites, sortBy]);
   const total = sites.reduce((s, x) => s + x.seconds, 0);
 
@@ -206,7 +242,7 @@ function TodayTab(): React.ReactElement {
 
   return (
     <div className="view-today">
-      <Donut data={sortSites(sites, 'time')} />
+      <Donut data={categories} />
       <div className="summary-bar">
         <div>
           <div className="summary-label">Today</div>
@@ -259,6 +295,7 @@ interface TotalStats {
   mostActive: { date: string; secs: number } | null;
   leastActive: { date: string; secs: number } | null;
   sites: SiteAgg[];
+  categories: CategoryAgg[];
 }
 
 function TotalTimeTab(): React.ReactElement {
@@ -266,12 +303,15 @@ function TotalTimeTab(): React.ReactElement {
   const [sortBy, setSortBy] = useState<SortKey>('time');
 
   useEffect(() => {
-    db.timeEntries.toArray().then(rows => {
+    Promise.all([
+      db.timeEntries.toArray(),
+      db.domainCategories.toArray(),
+    ]).then(([rows, catRows]) => {
       if (rows.length === 0) {
         setStats({
           firstActive: null, activeDays: 0, totalDays: 0,
           today: 0, total: 0, avgActive: 0,
-          mostActive: null, leastActive: null, sites: [],
+          mostActive: null, leastActive: null, sites: [], categories: [],
         });
         return;
       }
@@ -290,10 +330,11 @@ function TotalTimeTab(): React.ReactElement {
       const mostActive = { date: dayEntries[0][0], secs: dayEntries[0][1] };
       const leastActive = { date: dayEntries[dayEntries.length - 1][0], secs: dayEntries[dayEntries.length - 1][1] };
       const sites = aggregate(rows);
+      const categories = aggregateByCategory(rows, catRows);
       setStats({
         firstActive, activeDays, totalDays,
         today: todaySecs, total, avgActive: total / activeDays,
-        mostActive, leastActive, sites,
+        mostActive, leastActive, sites, categories,
       });
     });
   }, []);
@@ -319,7 +360,7 @@ function TotalTimeTab(): React.ReactElement {
         <ExtremeCard label="The most inactive day" icon="📅✅" date={stats.leastActive!.date} secs={stats.leastActive!.secs} />
       </div>
 
-      <Donut data={sortSites(stats.sites, 'time')} />
+      <Donut data={stats.categories} />
 
       <div className="aggregate-bar">
         <div>
