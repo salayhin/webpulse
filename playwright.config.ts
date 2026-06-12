@@ -34,5 +34,16 @@ export default defineConfig({
       use: { viewport: { width: 440, height: 680 } },
       testMatch: '**/popup.spec.ts',
     },
+    {
+      name: 'store',
+      use: { viewport: { width: 1280, height: 800 } },
+      testMatch: '**/store-screenshots.spec.ts',
+    },
+    {
+      // No extension needed — opens local HTML files only. Can run headless.
+      name: 'store-promo',
+      use: { headless: true },
+      testMatch: '**/store-promo.spec.ts',
+    },
   ],
 });

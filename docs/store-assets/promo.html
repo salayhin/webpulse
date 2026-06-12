@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebPulse — Promo Tile</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background: #1e1b4b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      position: relative;
+    }
+
+    /* Faint dot-grid background matching the icon */
+    .dots {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      opacity: .12;
+    }
+    .dots svg { width: 100%; height: 100%; }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      text-align: center;
+    }
+
+    .logo svg {
+      width: var(--icon-size, 72px);
+      height: var(--icon-size, 72px);
+      filter: drop-shadow(0 4px 16px rgba(99,102,241,.4));
+    }
+
+    .wordmark {
+      font-size: var(--name-size, 32px);
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -.03em;
+      line-height: 1;
+    }
+
+    .tagline {
+      font-size: var(--tag-size, 13px);
+      font-weight: 500;
+      color: #a5b4fc;
+      letter-spacing: .01em;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Dot grid background -->
+<div class="dots">
+  <svg viewBox="0 0 440 280" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="dots" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+        <circle cx="3" cy="3" r="2" fill="#818cf8"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#dots)"/>
+  </svg>
+</div>
+
+<div class="content">
+  <!-- Icon mark -->
+  <div class="logo">
+    <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+      <rect width="128" height="128" rx="28" fill="#2d2a6e"/>
+      <g fill="#4338ca">
+        <circle cx="24" cy="40" r="3"/><circle cx="40" cy="40" r="3"/><circle cx="56" cy="40" r="3"/>
+        <circle cx="72" cy="40" r="3"/><circle cx="88" cy="40" r="3"/><circle cx="104" cy="40" r="3"/>
+        <circle cx="24" cy="88" r="3"/><circle cx="40" cy="88" r="3"/><circle cx="56" cy="88" r="3"/>
+        <circle cx="72" cy="88" r="3"/><circle cx="88" cy="88" r="3"/><circle cx="104" cy="88" r="3"/>
+      </g>
+      <path d="M24 64 L40 64 L56 36 L72 96 L88 52 L104 64" fill="none" stroke="#a5b4fc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <g fill="#818cf8">
+        <circle cx="24" cy="64" r="6.5"/><circle cx="40" cy="64" r="6.5"/><circle cx="56" cy="36" r="6.5"/>
+        <circle cx="72" cy="96" r="6.5"/><circle cx="88" cy="52" r="6.5"/><circle cx="104" cy="64" r="6.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="wordmark">WebPulse</div>
+  <div class="tagline">The heartbeat of your browsing</div>
+</div>
+
+</body>
+</html>
